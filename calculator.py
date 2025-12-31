@@ -9,33 +9,64 @@ class BourseCalculator:
     """کلاس برای محاسبات مربوط به بورس"""
 
     @staticmethod
+    def _get_field(data: Dict, *field_names) -> any:
+        """
+        دریافت مقدار فیلد با چک کردن نام‌های مختلف (case-insensitive)
+
+        Args:
+            data: دیکشنری داده
+            field_names: نام‌های مختلف فیلد برای جستجو
+
+        Returns:
+            مقدار فیلد یا 0
+        """
+        for name in field_names:
+            # جستجوی case-insensitive
+            for key in data.keys():
+                if key.lower() == name.lower():
+                    return data[key]
+        return 0
+
+    @staticmethod
     def calculate_buyer_power(client_type_data: Dict) -> Dict:
         """
         محاسبه قدرت خریدار بر اساس داده‌های حقیقی و حقوقی
 
+        Supports both formats:
+        - Old TSETMC: {'clientType': {'buy_N_Volume': ...}}
+        - New BrsApi: {'Buy_N_Volume': ...}
+
         Args:
-            client_type_data: داده‌های clientType از API
+            client_type_data: داده‌های حقیقی/حقوقی از API
 
         Returns:
             دیکشنری شامل شاخص‌های قدرت خریدار
         """
-        ct = client_type_data.get('clientType', {})
+        # پشتیبانی از فرمت قدیمی TSETMC
+        if 'clientType' in client_type_data:
+            ct = client_type_data['clientType']
+        else:
+            # فرمت جدید BrsApi - داده‌ها مستقیماً در سطح اول هستند
+            ct = client_type_data
+
+        # استفاده از helper برای دریافت فیلدها (case-insensitive)
+        calc = BourseCalculator()
 
         # حجم خرید و فروش حقوقی
-        buy_legal_volume = float(ct.get('buy_N_Volume', 0))
-        sell_legal_volume = float(ct.get('sell_N_Volume', 0))
+        buy_legal_volume = float(calc._get_field(ct, 'buy_N_Volume', 'Buy_N_Volume'))
+        sell_legal_volume = float(calc._get_field(ct, 'sell_N_Volume', 'Sell_N_Volume'))
 
         # تعداد خرید و فروش حقوقی
-        buy_legal_count = int(ct.get('buy_CountN', 0))
-        sell_legal_count = int(ct.get('sell_CountN', 0))
+        buy_legal_count = int(calc._get_field(ct, 'buy_CountN', 'Buy_CountN'))
+        sell_legal_count = int(calc._get_field(ct, 'sell_CountN', 'Sell_CountN'))
 
         # حجم خرید و فروش حقیقی
-        buy_real_volume = float(ct.get('buy_I_Volume', 0))
-        sell_real_volume = float(ct.get('sell_I_Volume', 0))
+        buy_real_volume = float(calc._get_field(ct, 'buy_I_Volume', 'Buy_I_Volume'))
+        sell_real_volume = float(calc._get_field(ct, 'sell_I_Volume', 'Sell_I_Volume'))
 
         # تعداد خرید و فروش حقیقی
-        buy_real_count = int(ct.get('buy_CountI', 0))
-        sell_real_count = int(ct.get('sell_CountI', 0))
+        buy_real_count = int(calc._get_field(ct, 'buy_CountI', 'Buy_CountI'))
+        sell_real_count = int(calc._get_field(ct, 'sell_CountI', 'Sell_CountI'))
 
         # محاسبه ورود/خروج پول حقوقی (به میلیون)
         legal_money_flow = (buy_legal_volume - sell_legal_volume) / 1_000_000
