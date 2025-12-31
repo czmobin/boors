@@ -167,13 +167,22 @@ class StockFilter:
                     'درصد_تغییر': symbol_data.get('pcp', 0),
                     'حجم_معاملات': symbol_data.get('tvol', 0),
                     'ارزش_معاملات': symbol_data.get('tval', 0),
+                    # داده‌های حقیقی (برای محاسبه قدرت خریدار)
+                    'حجم_خرید_حقیقی': metrics['buy_real_volume'],
+                    'تعداد_خرید_حقیقی': metrics['buy_real_count'],
+                    'حجم_فروش_حقیقی': metrics['sell_real_volume'],
+                    'تعداد_فروش_حقیقی': metrics['sell_real_count'],
+                    # داده‌های حقوقی
                     'حجم_خرید_حقوقی': metrics['buy_legal_volume'],
                     'حجم_فروش_حقوقی': metrics['sell_legal_volume'],
                     'تعداد_خرید_حقوقی': metrics['buy_legal_count'],
                     'تعداد_فروش_حقوقی': metrics['sell_legal_count'],
+                    # محاسبات
+                    'X_سرانه_خرید_حقیقی_تومان': metrics['x_avg_buy_real_toman'],
+                    'Y_سرانه_فروش_حقیقی_تومان': metrics['y_avg_sell_real_toman'],
+                    'قدرت_خریدار': metrics['buyer_power_ratio'],
                     'ورود_پول_حقوقی_میلیون': metrics['legal_money_flow'],
                     'ورود_پول_حقیقی_میلیون': metrics['real_money_flow'],
-                    'قدرت_خریدار': metrics['buyer_power_ratio'],
                     'سرانه_خرید_حقوقی_میلیون': metrics['avg_buy_legal'],
                     'سرانه_فروش_حقوقی_میلیون': metrics['avg_sell_legal'],
                     'ورود_پول_خالص_میلیون': metrics['net_money_flow']
