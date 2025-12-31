@@ -37,6 +37,21 @@ class ExcelManager:
         # تبدیل به DataFrame
         df = pd.DataFrame(data_list)
 
+        # تعیین ترتیب ستون‌ها (ثابت برای جلوگیری از قاطی شدن)
+        column_order = [
+            'نماد', 'نام_کامل', 'کد', 'زمان', 'قیمت_پایانی', 'درصد_تغییر',
+            'حجم_معاملات', 'ارزش_معاملات',
+            'حجم_خرید_حقیقی', 'تعداد_خرید_حقیقی', 'حجم_فروش_حقیقی', 'تعداد_فروش_حقیقی',
+            'حجم_خرید_حقوقی', 'حجم_فروش_حقوقی', 'تعداد_خرید_حقوقی', 'تعداد_فروش_حقوقی',
+            'X_سرانه_خرید_حقیقی_تومان', 'Y_سرانه_فروش_حقیقی_تومان', 'قدرت_خریدار',
+            'ورود_پول_حقوقی_میلیون', 'ورود_پول_حقیقی_میلیون',
+            'سرانه_خرید_حقوقی_میلیون', 'سرانه_فروش_حقوقی_میلیون', 'ورود_پول_خالص_میلیون'
+        ]
+
+        # فقط ستون‌هایی که موجودند رو استفاده کن
+        available_columns = [col for col in column_order if col in df.columns]
+        df = df[available_columns]
+
         # مرتب‌سازی بر اساس قدرت خریدار (نزولی)
         if 'قدرت_خریدار' in df.columns:
             df = df.sort_values('قدرت_خریدار', ascending=False)
@@ -44,23 +59,18 @@ class ExcelManager:
             df = df.sort_values('buyer_power_ratio', ascending=False)
 
         try:
+            # نام شیت بر اساس زمان
+            sheet_name = datetime.now().strftime('%H-%M')
+
             # بررسی اینکه آیا فایل از قبل وجود دارد
             if os.path.exists(self.filename):
-                # خواندن داده‌های قبلی
-                with pd.ExcelFile(self.filename) as xls:
-                    existing_sheets = xls.sheet_names
-
-                # نام شیت جدید بر اساس زمان
-                sheet_name = datetime.now().strftime('%H-%M')
-
                 # ذخیره در شیت جدید
                 with pd.ExcelWriter(self.filename, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False, engine='openpyxl')
+                    df.to_excel(writer, sheet_name=sheet_name, index=False)
 
                 print(f"داده‌ها در شیت {sheet_name} ذخیره شد")
             else:
                 # ایجاد فایل جدید
-                sheet_name = datetime.now().strftime('%H-%M')
                 with pd.ExcelWriter(self.filename, engine='openpyxl') as writer:
                     df.to_excel(writer, sheet_name=sheet_name, index=False)
 
