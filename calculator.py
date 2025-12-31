@@ -77,8 +77,12 @@ class BourseCalculator:
         # محاسبه قدرت خریدار (نسبت خرید حقوقی به فروش)
         if sell_legal_volume > 0:
             buyer_power_ratio = buy_legal_volume / sell_legal_volume
+        elif buy_legal_volume > 0:
+            # اگر فروش صفر باشه ولی خرید داشته باشیم، عدد بزرگ (قدرت خیلی بالا)
+            buyer_power_ratio = 999.99
         else:
-            buyer_power_ratio = float('inf') if buy_legal_volume > 0 else 0
+            # هم خرید و هم فروش صفر
+            buyer_power_ratio = 0
 
         # سرانه خرید حقوقی (به میلیون تومان)
         avg_buy_legal = (buy_legal_volume / buy_legal_count / 1_000_000) if buy_legal_count > 0 else 0
@@ -116,7 +120,12 @@ class BourseCalculator:
             درصد رشد
         """
         if initial_value == 0:
-            return 0 if current_value == 0 else float('inf')
+            # اگر مقدار اولیه صفر بود
+            if current_value == 0:
+                return 0
+            else:
+                # رشد خیلی زیاد (از صفر شروع کرده)
+                return 999.99
 
         growth = ((current_value - initial_value) / abs(initial_value)) * 100
         return round(growth, 2)

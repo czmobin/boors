@@ -38,7 +38,9 @@ class ExcelManager:
         df = pd.DataFrame(data_list)
 
         # مرتب‌سازی بر اساس قدرت خریدار (نزولی)
-        if 'buyer_power_ratio' in df.columns:
+        if 'قدرت_خریدار' in df.columns:
+            df = df.sort_values('قدرت_خریدار', ascending=False)
+        elif 'buyer_power_ratio' in df.columns:
             df = df.sort_values('buyer_power_ratio', ascending=False)
 
         try:
