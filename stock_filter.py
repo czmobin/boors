@@ -30,13 +30,26 @@ class StockFilter:
         """
         بارگذاری لیست نمادها از فایل JSON
 
+        اگر symbols خالی باشد یا "process_all": true باشد، همه نمادها پردازش می‌شوند
+
         Returns:
             لیست دیکشنری‌های نماد
         """
         try:
             with open(self.symbols_file, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return data.get('symbols', [])
+
+                # چک کردن فلگ process_all
+                if data.get('process_all', False):
+                    print("⚙️  حالت 'همه نمادها' فعال است")
+                    return []  # خالی برگردان تا همه پردازش شوند
+
+                symbols = data.get('symbols', [])
+
+                if not symbols:
+                    print("⚠️  لیست نمادها خالی است - همه نمادها پردازش می‌شوند")
+
+                return symbols
         except Exception as e:
             print(f"خطا در بارگذاری فایل نمادها: {e}")
             return []
@@ -80,71 +93,104 @@ class StockFilter:
         """
         results = []
 
-        print(f"\n{'='*50}")
-        print(f"زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"در حال پردازش {len(self.symbols)} نماد...")
-        print(f"{'='*50}\n")
-
         # دریافت تمام نمادها یک بار
         all_data = self._get_all_symbols_data(force_refresh)
 
         if not all_data:
             return []
 
-        # پردازش فقط نمادهای انتخاب شده
-        for symbol_config in self.symbols:
-            symbol_id = symbol_config.get('id') or symbol_config.get('insCode')
-            ticker = symbol_config.get('ticker', '')
-            name = symbol_config.get('name', 'نامشخص')
+        # اگر symbols خالی باشد، همه نمادها رو پردازش کن
+        process_all = len(self.symbols) == 0
 
-            print(f"در حال پردازش: {name} ({ticker})")
+        if process_all:
+            symbols_to_process = all_data
+            print(f"\n{'='*50}")
+            print(f"زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"⚙️  حالت پردازش همه نمادها")
+            print(f"در حال پردازش {len(symbols_to_process)} نماد...")
+            print(f"{'='*50}\n")
+        else:
+            symbols_to_process = self.symbols
+            print(f"\n{'='*50}")
+            print(f"زمان: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"در حال پردازش {len(symbols_to_process)} نماد انتخابی...")
+            print(f"{'='*50}\n")
 
-            # جستجوی نماد در داده‌های دریافتی
-            symbol_data = None
+        # پردازش نمادها
+        for idx, item in enumerate(symbols_to_process, 1):
+            if process_all:
+                # داده مستقیماً از all_data
+                symbol_data = item
+                ticker = symbol_data.get('l18', 'N/A')
+                name = symbol_data.get('l30', 'نامشخص')
 
-            for item in all_data:
-                # جستجو با ticker (نماد کوتاه)
-                if item.get('l18') == ticker:
-                    symbol_data = item
-                    break
-                # یا جستجو با id (اگر موجود باشد)
-                elif symbol_id and str(item.get('id')) == str(symbol_id):
-                    symbol_data = item
-                    break
+                # نمایش پیشرفت هر 100 نماد
+                if idx % 100 == 0:
+                    print(f"پردازش شده: {idx}/{len(symbols_to_process)}")
+            else:
+                # جستجو بر اساس config
+                symbol_config = item
+                symbol_id = symbol_config.get('id') or symbol_config.get('insCode')
+                ticker = symbol_config.get('ticker', '')
+                name = symbol_config.get('name', 'نامشخص')
 
-            if not symbol_data:
-                print(f"  ⚠️  نماد یافت نشد")
-                continue
+                print(f"در حال پردازش: {name} ({ticker})")
+
+                # جستجوی نماد در داده‌های دریافتی
+                symbol_data = None
+
+                for data_item in all_data:
+                    # جستجو با ticker (نماد کوتاه)
+                    if data_item.get('l18') == ticker:
+                        symbol_data = data_item
+                        break
+                    # یا جستجو با id (اگر موجود باشد)
+                    elif symbol_id and str(data_item.get('id')) == str(symbol_id):
+                        symbol_data = data_item
+                        break
+
+                if not symbol_data:
+                    print(f"  ⚠️  نماد یافت نشد")
+                    continue
 
             # محاسبه شاخص‌ها
-            metrics = self.calculator.calculate_buyer_power(symbol_data)
+            try:
+                metrics = self.calculator.calculate_buyer_power(symbol_data)
 
-            # ترکیب اطلاعات
-            result = {
-                'نماد': ticker or symbol_data.get('l18', 'N/A'),
-                'نام_کامل': name,
-                'کد': str(symbol_data.get('id', 'N/A')),
-                'زمان': datetime.now().strftime('%H:%M:%S'),
-                'قیمت_پایانی': symbol_data.get('pc', 0),
-                'درصد_تغییر': symbol_data.get('pcp', 0),
-                'حجم_معاملات': symbol_data.get('tvol', 0),
-                'ارزش_معاملات': symbol_data.get('tval', 0),
-                'حجم_خرید_حقوقی': metrics['buy_legal_volume'],
-                'حجم_فروش_حقوقی': metrics['sell_legal_volume'],
-                'تعداد_خرید_حقوقی': metrics['buy_legal_count'],
-                'تعداد_فروش_حقوقی': metrics['sell_legal_count'],
-                'ورود_پول_حقوقی_میلیون': metrics['legal_money_flow'],
-                'ورود_پول_حقیقی_میلیون': metrics['real_money_flow'],
-                'قدرت_خریدار': metrics['buyer_power_ratio'],
-                'سرانه_خرید_حقوقی_میلیون': metrics['avg_buy_legal'],
-                'سرانه_فروش_حقوقی_میلیون': metrics['avg_sell_legal'],
-                'ورود_پول_خالص_میلیون': metrics['net_money_flow']
-            }
+                # ترکیب اطلاعات
+                result = {
+                    'نماد': ticker or symbol_data.get('l18', 'N/A'),
+                    'نام_کامل': name,
+                    'کد': str(symbol_data.get('id', 'N/A')),
+                    'زمان': datetime.now().strftime('%H:%M:%S'),
+                    'قیمت_پایانی': symbol_data.get('pc', 0),
+                    'درصد_تغییر': symbol_data.get('pcp', 0),
+                    'حجم_معاملات': symbol_data.get('tvol', 0),
+                    'ارزش_معاملات': symbol_data.get('tval', 0),
+                    'حجم_خرید_حقوقی': metrics['buy_legal_volume'],
+                    'حجم_فروش_حقوقی': metrics['sell_legal_volume'],
+                    'تعداد_خرید_حقوقی': metrics['buy_legal_count'],
+                    'تعداد_فروش_حقوقی': metrics['sell_legal_count'],
+                    'ورود_پول_حقوقی_میلیون': metrics['legal_money_flow'],
+                    'ورود_پول_حقیقی_میلیون': metrics['real_money_flow'],
+                    'قدرت_خریدار': metrics['buyer_power_ratio'],
+                    'سرانه_خرید_حقوقی_میلیون': metrics['avg_buy_legal'],
+                    'سرانه_فروش_حقوقی_میلیون': metrics['avg_sell_legal'],
+                    'ورود_پول_خالص_میلیون': metrics['net_money_flow']
+                }
 
-            results.append(result)
-            print(f"  ✓ قدرت خریدار: {metrics['buyer_power_ratio']}")
-            print(f"  ✓ ورود پول خالص: {metrics['net_money_flow']:,.0f} میلیون")
+                results.append(result)
 
+                if not process_all:
+                    print(f"  ✓ قدرت خریدار: {metrics['buyer_power_ratio']}")
+                    print(f"  ✓ ورود پول خالص: {metrics['net_money_flow']:,.0f} میلیون")
+
+            except Exception as e:
+                if not process_all:
+                    print(f"  ❌ خطا: {e}")
+                continue
+
+        print(f"\n✅ پردازش کامل شد: {len(results)} نماد")
         return results
 
     def filter_by_growth(self, current_data: List[Dict]) -> List[Dict]:
