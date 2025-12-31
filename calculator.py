@@ -78,11 +78,13 @@ class BourseCalculator:
         buy_real_count = int(calc._get_field(ct, 'buy_CountI', 'Buy_CountI'))
         sell_real_count = int(calc._get_field(ct, 'sell_CountI', 'Sell_CountI'))
 
-        # محاسبه ورود/خروج پول حقوقی (به میلیون)
-        legal_money_flow = (buy_legal_volume - sell_legal_volume) / 1_000_000
+        # محاسبه ورود/خروج پول حقوقی (به میلیون تومان)
+        # (Buy_N_Volume - Sell_N_Volume) * PC / 10 / 1,000,000
+        legal_money_flow = (buy_legal_volume - sell_legal_volume) * pc / 10 / 1_000_000
 
-        # محاسبه ورود/خروج پول حقیقی (به میلیون) - معکوس است
-        real_money_flow = (sell_real_volume - buy_real_volume) / 1_000_000
+        # محاسبه ورود/خروج پول حقیقی (به میلیون تومان)
+        # (Buy_I_Volume - Sell_I_Volume) * PC / 10 / 1,000,000
+        real_money_flow = (buy_real_volume - sell_real_volume) * pc / 10 / 1_000_000
 
         # محاسبه قدرت خریدار بر اساس فرمول جدید
         # x = سرانه خرید حقیقی به تومان
