@@ -7,12 +7,13 @@ import os
 import asyncio
 from datetime import datetime
 from typing import List, Dict
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
     MessageHandler,
+    CallbackQueryHandler,
     filters
 )
 from dotenv import load_dotenv
@@ -46,6 +47,27 @@ class BourseBot:
             return True  # اگر لیست خالی باشد، همه مجاز هستند
         return user_id in self.authorized_users
 
+    def get_main_keyboard(self) -> InlineKeyboardMarkup:
+        """ساخت کیبورد اصلی"""
+        keyboard = [
+            [
+                InlineKeyboardButton("🔍 اسکن", callback_data="scan"),
+                InlineKeyboardButton("📊 فیلتر", callback_data="filter"),
+            ],
+            [
+                InlineKeyboardButton("📑 Excel", callback_data="excel"),
+                InlineKeyboardButton("📋 نمادها", callback_data="symbols"),
+            ],
+            [
+                InlineKeyboardButton("📈 آمار", callback_data="stats"),
+                InlineKeyboardButton("🔄 ریست", callback_data="reset"),
+            ],
+            [
+                InlineKeyboardButton("❓ راهنما", callback_data="help"),
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """دستور /start"""
         user_id = update.effective_user.id
@@ -57,29 +79,18 @@ class BourseBot:
             )
             return
 
-        welcome_text = """
-🤖 سلام! من ربات فیلتر نمادهای بورس هستم.
+        welcome_text = """🤖 ربات فیلتر نمادهای بورس
 
-با من می‌تونی:
-✅ نمادهای بورس رو اسکن کنی
-✅ قدرت خریدار و ورود پول رو ببینی
-✅ نمادهای با رشد قدرت خریدار رو فیلتر کنی
-✅ فایل Excel نتایج رو دریافت کنی
+✅ اسکن نمادها و محاسبه قدرت خریدار
+✅ فیلتر نمادهای با رشد قدرت خریدار
+✅ دریافت فایل Excel با تمام داده‌ها
 
-📋 دستورات موجود:
-/scan - اسکن همه نمادها
-/filter - نمایش نمادهای فیلتر شده
-/excel - دریافت فایل Excel
-/reset - ریست داده‌های روز
-/symbols - لیست نمادهای تحت پوشش
-/search <نام> - جستجوی نماد
-/stats - آمار کلی
-/help - راهنمای کامل
+یک گزینه را انتخاب کنید:"""
 
-برای شروع /scan رو بزن!
-        """
-
-        await update.message.reply_text(welcome_text)
+        await update.message.reply_text(
+            welcome_text,
+            reply_markup=self.get_main_keyboard()
+        )
 
     async def help_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """دستور /help"""
@@ -429,11 +440,309 @@ class BourseBot:
 
         await update.message.reply_text(stats)
 
+    async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """مدیریت کلیک روی دکمه‌های inline"""
+        query = update.callback_query
+        await query.answer()  # پاسخ به callback query
+
+        if not self.is_authorized(query.from_user.id):
+            await query.edit_message_text("❌ شما مجاز به استفاده از این ربات نیستید")
+            return
+
+        action = query.data
+
+        # مسیریابی به متد مناسب
+        if action == "scan":
+            await self.scan_callback(query, context)
+        elif action == "filter":
+            await self.filter_callback(query, context)
+        elif action == "excel":
+            await self.excel_callback(query, context)
+        elif action == "symbols":
+            await self.symbols_callback(query, context)
+        elif action == "stats":
+            await self.stats_callback(query, context)
+        elif action == "reset":
+            await self.reset_callback(query, context)
+        elif action == "help":
+            await self.help_callback(query, context)
+        elif action == "menu":
+            # بازگشت به منوی اصلی
+            await query.edit_message_text(
+                "🤖 منوی اصلی\n\nیک گزینه را انتخاب کنید:",
+                reply_markup=self.get_main_keyboard()
+            )
+
+    def get_back_button(self) -> InlineKeyboardMarkup:
+        """دکمه بازگشت به منو"""
+        keyboard = [[InlineKeyboardButton("🔙 بازگشت به منو", callback_data="menu")]]
+        return InlineKeyboardMarkup(keyboard)
+
+    async def scan_callback(self, query, context):
+        """اسکن نمادها از طریق callback"""
+        # چک کردن حالت
+        process_all = len(self.stock_filter.symbols) == 0
+        try:
+            import json
+            with open('symbols.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                process_all = config.get('process_all', False) or process_all
+        except:
+            pass
+
+        if process_all:
+            await query.edit_message_text(
+                "⏳ در حال اسکن همه نمادها...\n"
+                "📊 1369 نماد (کل بازار)\n\n"
+                "⏱ لطفا صبر کنید..."
+            )
+        else:
+            await query.edit_message_text(
+                f"⏳ در حال اسکن {len(self.stock_filter.symbols)} نماد...\n\n"
+                "⏱ لطفا صبر کنید..."
+            )
+
+        try:
+            # تعیین اینکه آیا اولین اسکن روز است یا نه
+            is_first_scan = not self.stock_filter.initial_data
+
+            # اجرای اسکن
+            data = self.stock_filter.fetch_and_calculate()
+
+            if not data:
+                await query.edit_message_text(
+                    "❌ خطا در دریافت داده‌ها",
+                    reply_markup=self.get_back_button()
+                )
+                return
+
+            # ذخیره داده‌های اولیه در صورت نیاز
+            if is_first_scan:
+                self.stock_filter.initial_data = {item['کد']: item for item in data}
+                status = "✅ اسکن اول روز انجام شد"
+            else:
+                status = "✅ اسکن انجام شد"
+
+            # ذخیره در Excel
+            self.stock_filter.excel_manager.save_data(data)
+
+            # مرتب‌سازی بر اساس قدرت خریدار
+            data_sorted = sorted(data, key=lambda x: x.get('قدرت_خریدار', 0), reverse=True)
+
+            # نمایش 5 نماد برتر
+            top_5 = data_sorted[:5]
+
+            result = f"{status}\n\n"
+            result += f"🕐 {datetime.now().strftime('%H:%M:%S')}\n"
+            result += f"📊 تعداد: {len(data)} نماد\n\n"
+            result += "🔝 5 نماد برتر:\n\n"
+
+            for i, item in enumerate(top_5, 1):
+                result += f"{i}. {item['نماد']}\n"
+                result += f"   💪 {item['قدرت_خریدار']}\n"
+                result += f"   💰 {item['ورود_پول_خالص_میلیون']:,.0f} م\n\n"
+
+            await query.edit_message_text(result, reply_markup=self.get_back_button())
+
+        except Exception as e:
+            await query.edit_message_text(
+                f"❌ خطا: {str(e)}",
+                reply_markup=self.get_back_button()
+            )
+
+    async def filter_callback(self, query, context):
+        """فیلتر نمادها از طریق callback"""
+        if not self.stock_filter.initial_data:
+            await query.edit_message_text(
+                "⚠️ هنوز اسکن اولیه انجام نشده\n\n"
+                "ابتدا گزینه 'اسکن' را بزنید",
+                reply_markup=self.get_back_button()
+            )
+            return
+
+        await query.edit_message_text("🔍 در حال فیلتر...")
+
+        try:
+            # دریافت داده‌های فعلی
+            current_data = self.stock_filter.fetch_and_calculate()
+
+            if not current_data:
+                await query.edit_message_text(
+                    "❌ خطا در دریافت داده‌ها",
+                    reply_markup=self.get_back_button()
+                )
+                return
+
+            # فیلتر کردن
+            filtered = self.stock_filter.filter_by_growth(current_data)
+
+            if not filtered:
+                await query.edit_message_text(
+                    "📭 هیچ نمادی با رشد +10% پیدا نشد",
+                    reply_markup=self.get_back_button()
+                )
+                return
+
+            # ذخیره در شیت جداگانه
+            self.stock_filter.excel_manager.create_summary_sheet(filtered)
+
+            result = f"🎯 {len(filtered)} نماد فیلتر شده\n"
+            result += f"🕐 {datetime.now().strftime('%H:%M:%S')}\n\n"
+
+            for i, item in enumerate(filtered[:10], 1):
+                result += f"{i}. {item['نماد']}\n"
+                result += f"   📈 {item['رشد_قدرت_خریدار_درصد']:.1f}%\n"
+                result += f"   💰 {item['ورود_پول_خالص_میلیون']:,.0f} م\n\n"
+
+            if len(filtered) > 10:
+                result += f"و {len(filtered) - 10} نماد دیگر..."
+
+            await query.edit_message_text(result, reply_markup=self.get_back_button())
+
+        except Exception as e:
+            await query.edit_message_text(
+                f"❌ خطا: {str(e)}",
+                reply_markup=self.get_back_button()
+            )
+
+    async def excel_callback(self, query, context):
+        """ارسال فایل Excel"""
+        excel_file = self.stock_filter.excel_manager.filename
+
+        if not os.path.exists(excel_file):
+            await query.edit_message_text(
+                "❌ فایل Excel موجود نیست\n\n"
+                "ابتدا 'اسکن' را بزنید",
+                reply_markup=self.get_back_button()
+            )
+            return
+
+        await query.edit_message_text("📤 در حال ارسال...")
+
+        try:
+            # ارسال فایل
+            await query.message.reply_document(
+                document=open(excel_file, 'rb'),
+                filename=os.path.basename(excel_file),
+                caption=f"📊 گزارش - {datetime.now().strftime('%Y-%m-%d')}"
+            )
+
+            await query.edit_message_text(
+                "✅ فایل ارسال شد",
+                reply_markup=self.get_back_button()
+            )
+
+        except Exception as e:
+            await query.edit_message_text(
+                f"❌ خطا: {str(e)}",
+                reply_markup=self.get_back_button()
+            )
+
+    async def symbols_callback(self, query, context):
+        """نمایش نمادها"""
+        symbols = self.stock_filter.symbols
+
+        # چک کردن حالت "همه نمادها"
+        if len(symbols) == 0:
+            try:
+                import json
+                with open('symbols.json', 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    if config.get('process_all', False):
+                        result = "⚙️ حالت: همه نمادها\n\n"
+                        result += "📊 1369 نماد (کل بازار)"
+                        await query.edit_message_text(result, reply_markup=self.get_back_button())
+                        return
+            except:
+                pass
+
+            result = "⚠️ لیست نمادها خالی است"
+            await query.edit_message_text(result, reply_markup=self.get_back_button())
+            return
+
+        result = f"📋 {len(symbols)} نماد انتخاب شده\n\n"
+
+        # نمایش 20 نماد اول
+        for i, symbol in enumerate(symbols[:20], 1):
+            result += f"{i}. {symbol.get('ticker', '')}\n"
+
+        if len(symbols) > 20:
+            result += f"\n... و {len(symbols) - 20} نماد دیگر"
+
+        await query.edit_message_text(result, reply_markup=self.get_back_button())
+
+    async def stats_callback(self, query, context):
+        """نمایش آمار"""
+        # چک کردن حالت
+        process_all = len(self.stock_filter.symbols) == 0
+        try:
+            import json
+            with open('symbols.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                process_all = config.get('process_all', False) or process_all
+        except:
+            pass
+
+        stats = f"📊 آمار سیستم\n\n"
+
+        if process_all:
+            stats += f"⚙️ حالت: همه نمادها\n"
+            stats += f"📋 تعداد: 1369 نماد\n"
+        else:
+            stats += f"⚙️ حالت: انتخابی\n"
+            stats += f"📋 تعداد: {len(self.stock_filter.symbols)}\n"
+
+        stats += f"🕐 {datetime.now().strftime('%H:%M:%S')}\n"
+
+        if self.stock_filter.initial_data:
+            stats += f"✅ داده پایه: {len(self.stock_filter.initial_data)}\n"
+        else:
+            stats += "⚠️ داده پایه: ندارد\n"
+
+        excel_file = self.stock_filter.excel_manager.filename
+        if os.path.exists(excel_file):
+            file_size = os.path.getsize(excel_file) / 1024
+            stats += f"📁 Excel: {file_size:.1f} KB"
+        else:
+            stats += "📁 Excel: ندارد"
+
+        await query.edit_message_text(stats, reply_markup=self.get_back_button())
+
+    async def reset_callback(self, query, context):
+        """ریست داده‌ها"""
+        self.stock_filter.initial_data = {}
+
+        await query.edit_message_text(
+            "🔄 داده‌های پایه پاک شد\n\n"
+            "اسکن بعدی مبنای جدید خواهد بود",
+            reply_markup=self.get_back_button()
+        )
+
+    async def help_callback(self, query, context):
+        """راهنما"""
+        help_text = """📖 راهنمای ربات
+
+🔍 اسکن: محاسبه قدرت خریدار
+📊 فیلتر: نمادهای با رشد +10%
+📑 Excel: دریافت فایل کامل
+📋 نمادها: لیست نمادها
+📈 آمار: وضعیت سیستم
+🔄 ریست: پاک کردن داده پایه
+
+💡 نکته: اولین اسکن روز مبنای مقایسه است"""
+
+        await query.edit_message_text(help_text, reply_markup=self.get_back_button())
+
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """مدیریت خطاها"""
         print(f"Error: {context.error}")
 
-        if update and update.message:
+        if update and update.callback_query:
+            await update.callback_query.edit_message_text(
+                "❌ خطایی رخ داد",
+                reply_markup=self.get_back_button()
+            )
+        elif update and update.message:
             await update.message.reply_text(
                 "❌ خطایی رخ داد. لطفا دوباره تلاش کنید."
             )
@@ -444,6 +753,7 @@ class BourseBot:
 
         # اضافه کردن handlers
         self.app.add_handler(CommandHandler("start", self.start))
+        self.app.add_handler(CallbackQueryHandler(self.button_callback))
         self.app.add_handler(CommandHandler("help", self.help_command))
         self.app.add_handler(CommandHandler("scan", self.scan))
         self.app.add_handler(CommandHandler("filter", self.filter_command))
