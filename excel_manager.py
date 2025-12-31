@@ -62,19 +62,11 @@ class ExcelManager:
             # نام شیت بر اساس زمان
             sheet_name = datetime.now().strftime('%H-%M')
 
-            # بررسی اینکه آیا فایل از قبل وجود دارد
-            if os.path.exists(self.filename):
-                # ذخیره در شیت جدید
-                with pd.ExcelWriter(self.filename, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
+            # همیشه فایل رو از نو بساز (فقط آخرین اسکن نگه داشته میشه)
+            with pd.ExcelWriter(self.filename, mode='w', engine='openpyxl') as writer:
+                df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-                print(f"داده‌ها در شیت {sheet_name} ذخیره شد")
-            else:
-                # ایجاد فایل جدید
-                with pd.ExcelWriter(self.filename, engine='openpyxl') as writer:
-                    df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-                print(f"فایل جدید {self.filename} ایجاد شد")
+            print(f"✅ داده‌ها در شیت {sheet_name} ذخیره شد (فایل از نو ساخته شد)")
 
         except Exception as e:
             print(f"خطا در ذخیره داده‌ها: {e}")
@@ -111,9 +103,12 @@ class ExcelManager:
         try:
             df = pd.DataFrame(filtered_data)
 
-            with pd.ExcelWriter(self.filename, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
-                df.to_excel(writer, sheet_name='فیلتر_شده', index=False)
-
-            print("شیت خلاصه نمادهای فیلتر شده ایجاد شد")
+            # اگر فایل وجود داره، شیت فیلتر شده رو اضافه کن
+            if os.path.exists(self.filename):
+                with pd.ExcelWriter(self.filename, mode='a', engine='openpyxl', if_sheet_exists='replace') as writer:
+                    df.to_excel(writer, sheet_name='فیلتر_شده', index=False)
+                print("✅ شیت 'فیلتر_شده' اضافه شد")
+            else:
+                print("⚠️ فایل Excel موجود نیست - ابتدا اسکن کنید")
         except Exception as e:
             print(f"خطا در ایجاد شیت خلاصه: {e}")
