@@ -135,7 +135,8 @@ class BourseCalculator:
             # داده‌های خام برای دیباگ
             'pc': pc,
             'x_avg_buy_real_toman': round(x, 2),
-            'y_avg_sell_real_toman': round(y, 2)
+            'y_avg_sell_real_toman': round(y, 2),
+            'diff_avg_real_toman': round(x - y, 2)  # تفاضل سرانه (x - y)
         }
 
     @staticmethod

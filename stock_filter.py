@@ -180,6 +180,7 @@ class StockFilter:
                     # محاسبات
                     'X_سرانه_خرید_حقیقی_تومان': metrics['x_avg_buy_real_toman'],
                     'Y_سرانه_فروش_حقیقی_تومان': metrics['y_avg_sell_real_toman'],
+                    'تفاضل_سرانه_تومان': metrics['diff_avg_real_toman'],
                     'قدرت_خریدار': metrics['buyer_power_ratio'],
                     'ورود_پول_حقوقی_میلیون': metrics['legal_money_flow'],
                     'ورود_پول_حقیقی_میلیون': metrics['real_money_flow'],
