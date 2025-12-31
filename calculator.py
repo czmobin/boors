@@ -32,6 +32,11 @@ class BourseCalculator:
         """
         محاسبه قدرت خریدار بر اساس داده‌های حقیقی و حقوقی
 
+        فرمول قدرت خریدار:
+        x = (Buy_I_Volume / Buy_CountI) * PC / 10  // سرانه خرید حقیقی به تومان
+        y = (Sell_I_Volume / Sell_CountI) * PC / 10  // سرانه فروش حقیقی به تومان
+        buyer_power = x / y
+
         Supports both formats:
         - Old TSETMC: {'clientType': {'buy_N_Volume': ...}}
         - New BrsApi: {'Buy_N_Volume': ...}
@@ -51,6 +56,11 @@ class BourseCalculator:
 
         # استفاده از helper برای دریافت فیلدها (case-insensitive)
         calc = BourseCalculator()
+
+        # دریافت قیمت پایانی
+        pc = float(calc._get_field(ct, 'pc', 'PC', 'pClosing'))
+        if pc == 0:
+            pc = 1  # جلوگیری از تقسیم بر صفر
 
         # حجم خرید و فروش حقوقی
         buy_legal_volume = float(calc._get_field(ct, 'buy_N_Volume', 'Buy_N_Volume'))
@@ -74,20 +84,35 @@ class BourseCalculator:
         # محاسبه ورود/خروج پول حقیقی (به میلیون) - معکوس است
         real_money_flow = (sell_real_volume - buy_real_volume) / 1_000_000
 
-        # محاسبه قدرت خریدار (نسبت خرید حقوقی به فروش)
-        if sell_legal_volume > 0:
-            buyer_power_ratio = buy_legal_volume / sell_legal_volume
-        elif buy_legal_volume > 0:
-            # اگر فروش صفر باشه ولی خرید داشته باشیم، عدد بزرگ (قدرت خیلی بالا)
+        # محاسبه قدرت خریدار بر اساس فرمول جدید
+        # x = سرانه خرید حقیقی به تومان
+        if buy_real_count > 0:
+            avg_buy_real_volume = buy_real_volume / buy_real_count
+            x = (avg_buy_real_volume * pc) / 10  # تبدیل به تومان
+        else:
+            x = 0
+
+        # y = سرانه فروش حقیقی به تومان
+        if sell_real_count > 0:
+            avg_sell_real_volume = sell_real_volume / sell_real_count
+            y = (avg_sell_real_volume * pc) / 10  # تبدیل به تومان
+        else:
+            y = 0
+
+        # قدرت خریدار = x / y
+        if y > 0:
+            buyer_power_ratio = x / y
+        elif x > 0:
+            # اگر فروش صفر باشه ولی خرید داشته باشیم، قدرت خیلی بالا
             buyer_power_ratio = 999.99
         else:
             # هم خرید و هم فروش صفر
             buyer_power_ratio = 0
 
-        # سرانه خرید حقوقی (به میلیون تومان)
+        # سرانه خرید حقوقی (به میلیون تومان) - برای اطلاعات اضافی
         avg_buy_legal = (buy_legal_volume / buy_legal_count / 1_000_000) if buy_legal_count > 0 else 0
 
-        # سرانه فروش حقوقی (به میلیون تومان)
+        # سرانه فروش حقوقی (به میلیون تومان) - برای اطلاعات اضافی
         avg_sell_legal = (sell_legal_volume / sell_legal_count / 1_000_000) if sell_legal_count > 0 else 0
 
         return {
