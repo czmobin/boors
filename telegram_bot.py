@@ -17,6 +17,9 @@ from telegram.ext import (
     filters
 )
 from dotenv import load_dotenv
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+import pytz
 
 from stock_filter import StockFilter
 from find_symbol import search_symbol as find_symbol_code
@@ -41,6 +44,10 @@ class BourseBot:
         self.stock_filter = StockFilter()
         self.app = None
 
+        # Scheduler برای اسکن اتوماتیک
+        self.scheduler = AsyncIOScheduler(timezone=pytz.timezone('Asia/Tehran'))
+        self.auto_scan_enabled = False
+
     def is_authorized(self, user_id: int) -> bool:
         """بررسی مجاز بودن کاربر"""
         if not self.authorized_users:
@@ -49,6 +56,12 @@ class BourseBot:
 
     def get_main_keyboard(self) -> InlineKeyboardMarkup:
         """ساخت کیبورد اصلی"""
+        # دکمه اتوماتیک بر اساس وضعیت
+        if self.auto_scan_enabled:
+            auto_button = InlineKeyboardButton("⏸ توقف اتوماتیک", callback_data="stop_auto")
+        else:
+            auto_button = InlineKeyboardButton("▶️ شروع اتوماتیک", callback_data="start_auto")
+
         keyboard = [
             [
                 InlineKeyboardButton("🔍 اسکن", callback_data="scan"),
@@ -57,6 +70,9 @@ class BourseBot:
             [
                 InlineKeyboardButton("📑 Excel", callback_data="excel"),
                 InlineKeyboardButton("📋 نمادها", callback_data="symbols"),
+            ],
+            [
+                auto_button,
             ],
             [
                 InlineKeyboardButton("📈 آمار", callback_data="stats"),
@@ -440,6 +456,69 @@ class BourseBot:
 
         await update.message.reply_text(stats)
 
+    async def auto_scan_job(self):
+        """اسکن اتوماتیک (هر 5 دقیقه)"""
+        try:
+            print(f"🔄 اسکن اتوماتیک - {datetime.now().strftime('%H:%M:%S')}")
+
+            # اجرای اسکن
+            data = self.stock_filter.fetch_and_calculate()
+
+            if data:
+                # اولین اسکن روز رو ذخیره کن
+                if not self.stock_filter.initial_data:
+                    self.stock_filter.initial_data = {item['کد']: item for item in data}
+                    print(f"✅ داده پایه ذخیره شد - {len(data)} نماد")
+
+                # ذخیره در Excel (فایل قبلی پاک میشه)
+                self.stock_filter.excel_manager.save_data(data)
+                print(f"✅ Excel ذخیره شد - {len(data)} نماد")
+            else:
+                print("❌ خطا در اسکن اتوماتیک")
+
+        except Exception as e:
+            print(f"❌ خطا در اسکن اتوماتیک: {e}")
+
+    def start_auto_scan(self):
+        """شروع اسکن اتوماتیک"""
+        if self.auto_scan_enabled:
+            return "⚠️ اسکن اتوماتیک قبلاً فعال شده"
+
+        # ساعات کاری بورس: شنبه تا چهارشنبه 9:00-12:30
+        # هر 5 دقیقه
+        trigger = CronTrigger(
+            day_of_week='sat-wed',  # شنبه تا چهارشنبه
+            hour='9-12',
+            minute='*/5',
+            timezone=pytz.timezone('Asia/Tehran')
+        )
+
+        self.scheduler.add_job(
+            self.auto_scan_job,
+            trigger,
+            id='auto_scan',
+            replace_existing=True
+        )
+
+        if not self.scheduler.running:
+            self.scheduler.start()
+
+        self.auto_scan_enabled = True
+        return "✅ اسکن اتوماتیک فعال شد\n\n⏰ هر 5 دقیقه (ساعات بورس: 9:00-12:30)"
+
+    def stop_auto_scan(self):
+        """توقف اسکن اتوماتیک"""
+        if not self.auto_scan_enabled:
+            return "⚠️ اسکن اتوماتیک فعال نیست"
+
+        try:
+            self.scheduler.remove_job('auto_scan')
+        except:
+            pass
+
+        self.auto_scan_enabled = False
+        return "⏸ اسکن اتوماتیک متوقف شد"
+
     async def button_callback(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """مدیریت کلیک روی دکمه‌های inline"""
         query = update.callback_query
@@ -466,6 +545,14 @@ class BourseBot:
             await self.reset_callback(query, context)
         elif action == "help":
             await self.help_callback(query, context)
+        elif action == "start_auto":
+            # شروع اسکن اتوماتیک
+            msg = self.start_auto_scan()
+            await query.edit_message_text(msg, reply_markup=self.get_main_keyboard())
+        elif action == "stop_auto":
+            # توقف اسکن اتوماتیک
+            msg = self.stop_auto_scan()
+            await query.edit_message_text(msg, reply_markup=self.get_main_keyboard())
         elif action == "menu":
             # بازگشت به منوی اصلی
             await query.edit_message_text(
