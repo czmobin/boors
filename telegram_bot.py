@@ -128,11 +128,29 @@ class BourseBot:
         if not self.is_authorized(update.effective_user.id):
             return
 
-        msg = await update.message.reply_text(
-            "⏳ در حال اسکن نمادها...\n"
-            f"تعداد نمادها: {len(self.stock_filter.symbols)}\n"
-            "لطفا صبر کنید..."
-        )
+        # چک کردن حالت
+        process_all = len(self.stock_filter.symbols) == 0
+        try:
+            import json
+            with open('symbols.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                process_all = config.get('process_all', False) or process_all
+        except:
+            pass
+
+        if process_all:
+            msg = await update.message.reply_text(
+                "⏳ در حال اسکن همه نمادها...\n"
+                "📊 تعداد: 1369 نماد (کل بازار)\n\n"
+                "⚠️ این ممکن است 1-2 دقیقه طول بکشد\n"
+                "لطفا صبور باشید..."
+            )
+        else:
+            msg = await update.message.reply_text(
+                "⏳ در حال اسکن نمادها...\n"
+                f"📋 تعداد نمادها: {len(self.stock_filter.symbols)}\n"
+                "لطفا صبر کنید..."
+            )
 
         try:
             # تعیین اینکه آیا اولین اسکن روز است یا نه
@@ -285,10 +303,44 @@ class BourseBot:
 
         symbols = self.stock_filter.symbols
 
-        result = f"📋 نمادهای تحت پوشش ({len(symbols)} نماد):\n\n"
+        # چک کردن حالت "همه نمادها"
+        if len(symbols) == 0:
+            # بررسی اینکه process_all فعال است یا نه
+            try:
+                import json
+                with open('symbols.json', 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    if config.get('process_all', False):
+                        result = "⚙️ حالت: پردازش همه نمادها\n\n"
+                        result += "📊 تعداد: 1369 نماد (کل بازار)\n\n"
+                        result += "ℹ️ در این حالت، تمام نمادهای بورس پردازش می‌شوند.\n\n"
+                        result += "برای تغییر به حالت نمادهای خاص:\n"
+                        result += "1. فایل symbols.json را ویرایش کنید\n"
+                        result += '2. "process_all": false قرار دهید\n'
+                        result += "3. لیست نمادهای دلخواه را اضافه کنید"
+                        await update.message.reply_text(result)
+                        return
+            except:
+                pass
 
-        for i, symbol in enumerate(symbols, 1):
+            result = "⚠️ لیست نمادها خالی است!\n\n"
+            result += "برای افزودن نماد:\n"
+            result += "1. از /search برای پیدا کردن ticker استفاده کنید\n"
+            result += "2. فایل symbols.json را ویرایش کنید"
+            await update.message.reply_text(result)
+            return
+
+        result = f"📋 نمادهای انتخاب شده ({len(symbols)} نماد):\n\n"
+
+        # نمایش حداکثر 50 نماد اول
+        for i, symbol in enumerate(symbols[:50], 1):
             result += f"{i}. {symbol.get('name', 'نامشخص')} ({symbol.get('ticker', '')})\n"
+
+        if len(symbols) > 50:
+            result += f"\n... و {len(symbols) - 50} نماد دیگر"
+
+        result += "\n\nℹ️ برای پردازش همه نمادها:"
+        result += "\ncp symbols_all.json symbols.json"
 
         await update.message.reply_text(result)
 
@@ -341,8 +393,25 @@ class BourseBot:
         if not self.is_authorized(update.effective_user.id):
             return
 
+        # چک کردن حالت همه نمادها
+        process_all = len(self.stock_filter.symbols) == 0
+        try:
+            import json
+            with open('symbols.json', 'r', encoding='utf-8') as f:
+                config = json.load(f)
+                process_all = config.get('process_all', False) or process_all
+        except:
+            pass
+
         stats = f"📊 آمار سیستم\n\n"
-        stats += f"📋 تعداد نمادها: {len(self.stock_filter.symbols)}\n"
+
+        if process_all:
+            stats += f"⚙️ حالت: پردازش همه نمادها\n"
+            stats += f"📋 تعداد: 1369 نماد (کل بازار)\n"
+        else:
+            stats += f"⚙️ حالت: نمادهای انتخاب شده\n"
+            stats += f"📋 تعداد: {len(self.stock_filter.symbols)} نماد\n"
+
         stats += f"📅 تاریخ: {datetime.now().strftime('%Y-%m-%d')}\n"
         stats += f"🕐 ساعت: {datetime.now().strftime('%H:%M:%S')}\n"
 
