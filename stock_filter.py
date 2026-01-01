@@ -26,7 +26,10 @@ class StockFilter:
         self.api_client = BrsApiClient()
         self.calculator = BourseCalculator()
         self.excel_manager = ExcelManager()
-        self.initial_data = {}  # ذخیره داده‌های ابتدای روز
+        # ذخیره رکوردهای تاریخی (ساعت‌های مختلف روز)
+        # مثال: {'09:05': {code: data}, '09:10': {code: data}, ...}
+        self.historical_records = {}
+        self.initial_data = {}  # نگه‌داری برای backward compatibility
         self.symbols = self._load_symbols()
 
         # Cache برای داده‌های تمام نمادها
@@ -183,7 +186,6 @@ class StockFilter:
                 # ترکیب اطلاعات
                 result = {
                     'نماد': ticker or symbol_data.get('l18', 'N/A'),
-                    'نام_کامل': name,
                     'کد': str(symbol_data.get('id', 'N/A')),
                     'زمان': datetime.now().strftime('%H:%M:%S'),
                     'قیمت_پایانی': symbol_data.get('pc', 0),
@@ -231,6 +233,34 @@ class StockFilter:
 
         return results
 
+    def get_baseline_record(self) -> Optional[Dict]:
+        """
+        پیدا کردن نزدیک‌ترین رکورد به ساعت 9:05 صبح
+
+        اولویت: 09:05 > 09:10 > 09:15 > ... > اولین رکورد موجود
+
+        Returns:
+            دیکشنری داده‌های baseline یا None
+        """
+        if not self.historical_records:
+            # fallback به initial_data قدیمی
+            return self.initial_data if self.initial_data else None
+
+        # لیست زمان‌های مطلوب به ترتیب اولویت
+        preferred_times = ['09:05', '09:10', '09:15', '09:20', '09:25', '09:30']
+
+        # جستجو به ترتیب اولویت
+        for time_key in preferred_times:
+            if time_key in self.historical_records:
+                return self.historical_records[time_key]
+
+        # اگر هیچ کدام موجود نبود، اولین رکورد موجود رو برگردون
+        if self.historical_records:
+            first_key = sorted(self.historical_records.keys())[0]
+            return self.historical_records[first_key]
+
+        return None
+
     def filter_by_growth(self, current_data: List[Dict]) -> List[Dict]:
         """
         فیلتر نمادهایی که قدرت خریدارشان نسبت به ابتدای روز رشد کرده
@@ -241,7 +271,9 @@ class StockFilter:
         Returns:
             لیست نمادهای فیلتر شده
         """
-        if not self.initial_data:
+        baseline_data = self.get_baseline_record()
+
+        if not baseline_data:
             print("هنوز داده ابتدای روز موجود نیست")
             return []
 
@@ -251,7 +283,7 @@ class StockFilter:
             symbol_code = current['کد']
 
             # پیدا کردن داده اولیه این نماد
-            initial = self.initial_data.get(symbol_code)
+            initial = baseline_data.get(symbol_code)
 
             if initial:
                 initial_power = initial.get('قدرت_خریدار', 0)
@@ -290,8 +322,16 @@ class StockFilter:
 
         # ذخیره داده‌های اولیه
         if save_as_initial or not self.initial_data:
-            self.initial_data = {item['کد']: item for item in data}
-            print(f"\n✓ داده‌های اولیه برای {len(self.initial_data)} نماد ذخیره شد")
+            current_time = datetime.now().strftime('%H:%M')
+            data_dict = {item['کد']: item for item in data}
+
+            # ذخیره در historical_records با timestamp
+            self.historical_records[current_time] = data_dict
+
+            # نگه‌داری backward compatibility
+            self.initial_data = data_dict
+
+            print(f"\n✓ داده‌های اولیه برای {len(self.initial_data)} نماد ذخیره شد (زمان: {current_time})")
 
         # ذخیره در Excel
         self.excel_manager.save_data(data)
@@ -517,7 +557,9 @@ class StockFilter:
         Returns:
             لیست نمادهای فیلتر شده
         """
-        if not self.initial_data:
+        baseline_data = self.get_baseline_record()
+
+        if not baseline_data:
             print("⚠️  داده اولیه موجود نیست. ابتدا یک اسکن اولیه انجام دهید.")
             return []
 
@@ -528,7 +570,7 @@ class StockFilter:
             symbol_name = current['نماد']
 
             # پیدا کردن داده اولیه
-            initial = self.initial_data.get(symbol_code)
+            initial = baseline_data.get(symbol_code)
             if not initial:
                 continue
 
