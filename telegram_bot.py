@@ -25,6 +25,7 @@ import jdatetime
 
 from stock_filter import StockFilter
 from find_symbol import search_symbol as find_symbol_code
+from chart_generator import ChartGenerator
 import io
 import sys
 
@@ -48,6 +49,7 @@ class BourseBot:
         self.authorized_users = [int(uid.strip()) for uid in authorized.split(',') if uid.strip()]
 
         self.stock_filter = StockFilter()
+        self.chart_generator = ChartGenerator()
         self.app = None
 
         # Scheduler برای اسکن اتوماتیک
@@ -120,6 +122,9 @@ class BourseBot:
             ],
             [
                 InlineKeyboardButton("📊 همه رشدها (فیلتر ساده)", callback_data="filter_all_growth"),
+            ],
+            [
+                InlineKeyboardButton("📉 نمودار برترین‌ها", callback_data="chart_top"),
             ],
             [
                 InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_main"),
@@ -818,6 +823,9 @@ class BourseBot:
         elif action == "filter_all_growth":
             # فیلتر ساده همه رشدها
             await self.apply_filter(query, context, 'all_growth')
+        elif action == "chart_top":
+            # نمودار برترین نمادها
+            await self.chart_top_callback(query, context)
         elif action == "back_to_main":
             # بازگشت به منوی اصلی
             await query.edit_message_text(
@@ -993,6 +1001,52 @@ class BourseBot:
                 reply_markup=self.get_back_button()
             )
 
+    async def chart_top_callback(self, query, context):
+        """ارسال نمودار برترین نمادها"""
+        history = self.stock_filter.history
+
+        if len(history) < 2:
+            await query.edit_message_text(
+                "⚠️ داده کافی برای نمودار نیست\n\n"
+                f"تعداد اسکن‌ها: {len(history)}\n"
+                "حداقل 2 اسکن نیاز است\n\n"
+                "لطفا چند بار اسکن کنید یا auto-scan را فعال کنید",
+                reply_markup=self.get_filter_menu_keyboard()
+            )
+            return
+
+        await query.edit_message_text("📊 در حال ساخت نمودار...")
+
+        try:
+            # ساخت نمودار برترین‌ها
+            chart_bytes = self.chart_generator.generate_top_symbols_chart(history, top_n=10)
+
+            if not chart_bytes:
+                await query.edit_message_text(
+                    "❌ خطا در ساخت نمودار",
+                    reply_markup=self.get_filter_menu_keyboard()
+                )
+                return
+
+            # حذف پیام قبلی
+            await query.message.delete()
+
+            # ارسال نمودار
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=io.BytesIO(chart_bytes),
+                caption=f"📊 نمودار 10 نماد برتر\n"
+                        f"🕐 {datetime.now().strftime('%H:%M:%S')}\n"
+                        f"📈 بر اساس {len(history)} اسکن",
+                reply_markup=self.get_filter_menu_keyboard()
+            )
+
+        except Exception as e:
+            await query.edit_message_text(
+                f"❌ خطا در ساخت نمودار: {str(e)}",
+                reply_markup=self.get_filter_menu_keyboard()
+            )
+
     async def excel_callback(self, query, context):
         """ارسال فایل Excel"""
         excel_file = self.stock_filter.excel_manager.filename
@@ -1137,12 +1191,14 @@ class BourseBot:
 
         text = """➕ اضافه کردن نماد جدید
 
-لطفا اطلاعات نماد را به صورت زیر ارسال کنید:
-
-نام نماد | ticker
+لطفا نماد (ticker) را ارسال کنید:
 
 مثال:
-گروه مالی نماد غدیر | نماد
+وبملت
+نماد
+کیان
+
+ربات خودکار نام کامل را پیدا می‌کند.
 
 برای لغو، /cancel را ارسال کنید."""
 
@@ -1219,48 +1275,67 @@ class BourseBot:
         waiting_for = context.user_data.get('waiting_for')
 
         if waiting_for == 'add_symbol':
-            text = update.message.text.strip()
+            ticker = update.message.text.strip()
 
-            # جدا کردن نام و ticker
-            if '|' not in text:
-                await update.message.reply_text(
-                    "❌ فرمت نادرست!\n\n"
-                    "لطفا به صورت زیر ارسال کنید:\n"
-                    "نام نماد | ticker\n\n"
-                    "مثال:\n"
-                    "گروه مالی نماد غدیر | نماد"
-                )
+            if not ticker:
+                await update.message.reply_text("❌ نماد نمی‌تواند خالی باشد")
                 return
 
-            parts = text.split('|')
-            if len(parts) != 2:
+            # نمایش پیام در حال جستجو
+            search_msg = await update.message.reply_text(f"🔍 در حال جستجوی '{ticker}'...")
+
+            try:
+                # جستجو برای نماد
+                import requests
+                search_url = f"https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/{ticker}"
+                headers = {
+                    'accept': 'application/json, text/plain, */*',
+                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+
+                response = requests.get(search_url, headers=headers, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+
+                if 'instrumentSearch' in data and data['instrumentSearch']:
+                    # اولین نتیجه را بگیر
+                    first_result = data['instrumentSearch'][0]
+                    name = first_result.get('lVal30', ticker)
+                    found_ticker = first_result.get('lVal18', ticker)
+
+                    # حذف پیام جستجو
+                    await search_msg.delete()
+
+                    # اضافه کردن نماد
+                    success = self.stock_filter.add_symbol(name, found_ticker)
+
+                    if success:
+                        symbols = self.stock_filter.get_symbols()
+                        await update.message.reply_text(
+                            f"✅ نماد اضافه شد\n\n"
+                            f"📌 نماد: {found_ticker}\n"
+                            f"📄 نام: {name}\n\n"
+                            f"📊 تعداد کل نمادها: {len(symbols)}",
+                            reply_markup=self.get_main_keyboard()
+                        )
+                    else:
+                        await update.message.reply_text(
+                            f"❌ نماد {found_ticker} قبلا وجود دارد",
+                            reply_markup=self.get_main_keyboard()
+                        )
+                else:
+                    await search_msg.delete()
+                    await update.message.reply_text(
+                        f"❌ نمادی با نام '{ticker}' پیدا نشد\n\n"
+                        f"لطفا نام دقیق نماد را وارد کنید",
+                        reply_markup=self.get_main_keyboard()
+                    )
+
+            except Exception as e:
+                await search_msg.delete()
                 await update.message.reply_text(
-                    "❌ فرمت نادرست!\n\n"
-                    "لطفا فقط یک | استفاده کنید"
-                )
-                return
-
-            name = parts[0].strip()
-            ticker = parts[1].strip()
-
-            if not name or not ticker:
-                await update.message.reply_text("❌ نام و ticker نمی‌توانند خالی باشند")
-                return
-
-            # اضافه کردن نماد
-            success = self.stock_filter.add_symbol(name, ticker)
-
-            if success:
-                symbols = self.stock_filter.get_symbols()
-                await update.message.reply_text(
-                    f"✅ نماد {ticker} با موفقیت اضافه شد\n\n"
-                    f"📊 تعداد کل نمادها: {len(symbols)}",
-                    reply_markup=self.get_main_keyboard()
-                )
-            else:
-                await update.message.reply_text(
-                    f"❌ خطا در اضافه کردن نماد {ticker}\n"
-                    f"(احتمالا این نماد قبلا وجود دارد)",
+                    f"❌ خطا در جستجو: {str(e)}\n\n"
+                    f"لطفا دوباره تلاش کنید",
                     reply_markup=self.get_main_keyboard()
                 )
 
