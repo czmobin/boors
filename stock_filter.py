@@ -54,39 +54,51 @@ class StockFilter:
             print(f"خطا در بارگذاری فایل نمادها: {e}")
             return []
 
-    def _get_all_symbols_data(self, force_refresh: bool = False) -> Optional[List[Dict]]:
+    def _get_all_symbols_data(self, force_refresh: bool = False, date: str = None) -> Optional[List[Dict]]:
         """
         دریافت داده‌های تمام نمادها (با cache)
 
         Args:
             force_refresh: آیا cache را نادیده بگیریم و داده جدید بگیریم؟
+            date: تاریخ به فرمت YYYY-MM-DD (برای داده تاریخی)
 
         Returns:
             لیست تمام نمادها
         """
+        # اگر تاریخ داده شده، همیشه refresh کن (cache نکن)
+        if date:
+            force_refresh = True
+
         # اگر cache موجود است و نیاز به refresh نیست
         if not force_refresh and self.all_symbols_cache is not None:
             return self.all_symbols_cache
 
         # دریافت داده‌های جدید
-        print("📡 در حال دریافت داده‌های تمام نمادها از BrsApi...")
-        data = self.api_client.get_all_symbols()
+        if date:
+            print(f"📡 در حال دریافت داده‌های تاریخ {date} از BrsApi...")
+        else:
+            print("📡 در حال دریافت داده‌های تمام نمادها از BrsApi...")
+
+        data = self.api_client.get_all_symbols(date=date)
 
         if data:
-            self.all_symbols_cache = data
-            self.cache_time = datetime.now()
+            # فقط اگر تاریخ نداشتیم، cache کن
+            if not date:
+                self.all_symbols_cache = data
+                self.cache_time = datetime.now()
             print(f"✅ {len(data)} نماد دریافت شد")
             return data
 
         print("❌ خطا در دریافت داده‌ها")
         return None
 
-    def fetch_and_calculate(self, force_refresh: bool = False) -> List[Dict]:
+    def fetch_and_calculate(self, force_refresh: bool = False, date: str = None) -> List[Dict]:
         """
         دریافت داده و محاسبه شاخص‌ها برای نمادهای انتخاب شده
 
         Args:
             force_refresh: آیا cache را نادیده بگیریم؟
+            date: تاریخ به فرمت YYYY-MM-DD (برای داده تاریخی)
 
         Returns:
             لیست دیکشنری‌های حاوی اطلاعات محاسبه شده
@@ -94,7 +106,7 @@ class StockFilter:
         results = []
 
         # دریافت تمام نمادها یک بار
-        all_data = self._get_all_symbols_data(force_refresh)
+        all_data = self._get_all_symbols_data(force_refresh, date=date)
 
         if not all_data:
             return []

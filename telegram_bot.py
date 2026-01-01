@@ -139,6 +139,10 @@ class BourseBot:
 جستجوی نماد و پیدا کردن insCode
 مثال: /search غدیر
 
+📅 /scandate تاریخ
+اسکن داده‌های تاریخی (روزهای گذشته)
+مثال: /scandate 2025-12-30
+
 📈 /stats
 نمایش آمار کلی نمادها
 
@@ -146,6 +150,7 @@ class BourseBot:
 - اولین اسکن روز مبنای مقایسه قرار میگیره
 - برای نتیجه بهتر، اول صبح یه بار اسکن کن
 - فایل Excel روزانه ذخیره میشه
+- با /scandate می‌تونی روزهای قبل رو بررسی کنی
         """
 
         await update.message.reply_text(help_text)
@@ -414,6 +419,91 @@ class BourseBot:
 
         except Exception as e:
             await msg.edit_text(f"❌ خطا در جستجو: {str(e)}")
+
+    async def scandate_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """دستور /scandate - اسکن برای تاریخ خاص"""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "❌ لطفا تاریخ را وارد کنید.\n"
+                "📅 فرمت: YYYY-MM-DD\n\n"
+                "مثال:\n"
+                "/scandate 2025-12-30\n"
+                "/scandate 2025-12-25"
+            )
+            return
+
+        date = context.args[0]
+
+        # بررسی فرمت تاریخ
+        import re
+        if not re.match(r'^\d{4}-\d{2}-\d{2}$', date):
+            await update.message.reply_text(
+                "❌ فرمت تاریخ اشتباه است!\n"
+                "📅 فرمت صحیح: YYYY-MM-DD\n\n"
+                "مثال: /scandate 2025-12-30"
+            )
+            return
+
+        msg = await update.message.reply_text(
+            f"📅 در حال اسکن داده‌های تاریخ {date}...\n"
+            "⏱ لطفا صبر کنید..."
+        )
+
+        try:
+            # اجرای اسکن با تاریخ
+            data = self.stock_filter.fetch_and_calculate(force_refresh=True, date=date)
+
+            if not data:
+                await msg.edit_text(
+                    f"❌ خطا در دریافت داده‌های تاریخ {date}\n\n"
+                    "احتمالاً:\n"
+                    "• API این تاریخ را پشتیبانی نمی‌کند\n"
+                    "• تاریخ تعطیل بورس بوده\n"
+                    "• API Key معتبر نیست"
+                )
+                return
+
+            # ذخیره در Excel
+            # نام فایل با تاریخ
+            original_filename = self.stock_filter.excel_manager.filename
+            date_filename = original_filename.replace(
+                datetime.now().strftime('%Y-%m-%d'),
+                date
+            )
+            self.stock_filter.excel_manager.filename = date_filename
+            self.stock_filter.excel_manager.save_data(data)
+            self.stock_filter.excel_manager.filename = original_filename  # بازگشت به نام اصلی
+
+            # مرتب‌سازی
+            data_sorted = sorted(data, key=lambda x: x.get('قدرت_خریدار', 0), reverse=True)
+            top_5 = data_sorted[:5]
+
+            result = f"✅ اسکن تاریخ {date} انجام شد\n\n"
+            result += f"📊 تعداد: {len(data)} نماد\n\n"
+            result += "🔝 5 نماد برتر:\n\n"
+
+            for i, item in enumerate(top_5, 1):
+                result += f"{i}. {item['نماد']}\n"
+                result += f"   💪 {item['قدرت_خریدار']}\n"
+                result += f"   💰 {item['ورود_پول_خالص_میلیون']:,.0f} م\n\n"
+
+            result += f"\n📁 فایل Excel ذخیره شد:\n{os.path.basename(date_filename)}"
+
+            await msg.edit_text(result)
+
+            # ارسال فایل
+            if os.path.exists(date_filename):
+                await update.message.reply_document(
+                    document=open(date_filename, 'rb'),
+                    filename=os.path.basename(date_filename),
+                    caption=f"📊 گزارش {date}"
+                )
+
+        except Exception as e:
+            await msg.edit_text(f"❌ خطا: {str(e)}")
 
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """دستور /stats - نمایش آمار"""
@@ -848,6 +938,7 @@ class BourseBot:
         self.app.add_handler(CommandHandler("reset", self.reset_command))
         self.app.add_handler(CommandHandler("symbols", self.symbols_command))
         self.app.add_handler(CommandHandler("search", self.search_command))
+        self.app.add_handler(CommandHandler("scandate", self.scandate_command))
         self.app.add_handler(CommandHandler("stats", self.stats_command))
 
         # Error handler

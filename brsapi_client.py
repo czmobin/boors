@@ -21,7 +21,7 @@ class BrsApiClient:
             print("لطفا BRSAPI_KEY را در فایل .env تنظیم کنید")
             print("برای دریافت API Key رایگان به https://brsapi.ir بروید")
 
-    def get_all_symbols(self, retries: int = 3) -> Optional[List[Dict]]:
+    def get_all_symbols(self, retries: int = 3, date: str = None) -> Optional[List[Dict]]:
         """
         دریافت اطلاعات تمام نمادها از brsapi.ir
 
@@ -30,6 +30,7 @@ class BrsApiClient:
 
         Args:
             retries: تعداد دفعات تلاش مجدد
+            date: تاریخ به فرمت YYYY-MM-DD (اختیاری - برای داده‌های تاریخی)
 
         Returns:
             لیست دیکشنری حاوی اطلاعات نمادها یا None در صورت خطا
@@ -41,6 +42,10 @@ class BrsApiClient:
         for attempt in range(retries):
             try:
                 url = f"{ALL_SYMBOLS_URL}?key={self.api_key}"
+                if date:
+                    url += f"&date={date}"
+                    print(f"📅 در حال دریافت داده‌های تاریخ {date}...")
+
                 response = self.session.get(url, timeout=30)
                 response.raise_for_status()
 
@@ -48,7 +53,8 @@ class BrsApiClient:
 
                 # بررسی ساختار پاسخ
                 if isinstance(data, list):
-                    print(f"✅ {len(data)} نماد از brsapi.ir دریافت شد")
+                    date_info = f" (تاریخ: {date})" if date else ""
+                    print(f"✅ {len(data)} نماد از brsapi.ir دریافت شد{date_info}")
                     return data
                 else:
                     print(f"⚠️  فرمت داده غیرمنتظره: {type(data)}")
