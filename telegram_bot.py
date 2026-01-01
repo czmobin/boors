@@ -37,6 +37,7 @@ class BourseBot:
     # States برای ConversationHandler
     WAITING_ADD_SYMBOL = 1
     WAITING_REMOVE_SYMBOL = 2
+    WAITING_CUSTOM_FILTER_PARAMS = 3
 
     def __init__(self):
         load_dotenv()
@@ -115,6 +116,9 @@ class BourseBot:
     def get_filter_menu_keyboard(self) -> InlineKeyboardMarkup:
         """ساخت کیبورد انتخاب نوع فیلتر"""
         keyboard = [
+            [
+                InlineKeyboardButton("⚙️ فیلتر سفارشی", callback_data="filter_custom"),
+            ],
             [
                 InlineKeyboardButton("📈 رشد مثبت (شیب ملایم)", callback_data="filter_positive_gentle"),
             ],
@@ -824,6 +828,9 @@ class BourseBot:
         elif action == "filter_all_growth":
             # فیلتر ساده همه رشدها
             await self.apply_filter(query, context, 'all_growth')
+        elif action == "filter_custom":
+            # فیلتر سفارشی
+            await self.custom_filter_callback(query, context)
         elif action == "chart_top":
             # نمودار برترین نمادها
             await self.chart_top_callback(query, context)
@@ -1046,6 +1053,126 @@ class BourseBot:
             await query.edit_message_text(
                 f"❌ خطا در ساخت نمودار: {str(e)}",
                 reply_markup=self.get_filter_menu_keyboard()
+            )
+
+    async def custom_filter_callback(self, query, context):
+        """شروع فیلتر سفارشی - دریافت پارامترها"""
+        if not self.stock_filter.initial_data:
+            await query.edit_message_text(
+                "⚠️ هنوز اسکن اولیه انجام نشده\n\n"
+                "ابتدا گزینه 'اسکن' را بزنید",
+                reply_markup=self.get_back_button()
+            )
+            return
+
+        context.user_data['waiting_for'] = 'custom_filter_params'
+
+        text = """⚙️ فیلتر سفارشی
+
+لطفا دو عدد را ارسال کنید:
+
+فرمت: درصد_تغییر_قدرت ورود_پول_میلیون
+
+مثال:
+15 500
+(یعنی: تغییر قدرت >15% و ورود پول >500 میلیون)
+
+10 100
+(یعنی: تغییر قدرت >10% و ورود پول >100 میلیون)
+
+💡 توضیح:
+• درصد_تغییر_قدرت: حداقل تغییر قدرت خریدار نسبت به صبح (9:05)
+• ورود_پول_میلیون: حداقل ورود پول خالص (میلیون تومان)
+
+برای لغو: /cancel"""
+
+        await query.edit_message_text(text)
+
+    async def apply_custom_filter(self, update: Update, context: ContextTypes.DEFAULT_TYPE,
+                                   min_power_change: float, min_money_flow: float):
+        """اعمال فیلتر سفارشی"""
+        await update.message.reply_text("🔍 در حال فیلتر با پارامترهای سفارشی...")
+
+        try:
+            # دریافت داده‌های فعلی
+            current_data = self.stock_filter.fetch_and_calculate()
+
+            if not current_data:
+                await update.message.reply_text(
+                    "❌ خطا در دریافت داده‌ها",
+                    reply_markup=self.get_main_keyboard()
+                )
+                return
+
+            if not self.stock_filter.initial_data:
+                await update.message.reply_text(
+                    "⚠️ داده اولیه موجود نیست",
+                    reply_markup=self.get_main_keyboard()
+                )
+                return
+
+            # فیلتر کردن
+            filtered = []
+            for current in current_data:
+                symbol_code = current['کد']
+                initial = self.stock_filter.initial_data.get(symbol_code)
+
+                if initial:
+                    initial_power = initial.get('قدرت_خریدار', 0)
+                    current_power = current.get('قدرت_خریدار', 0)
+                    money_flow = current.get('ورود_پول_خالص_میلیون', 0)
+
+                    # محاسبه درصد تغییر
+                    if initial_power > 0:
+                        power_change = ((current_power - initial_power) / initial_power) * 100
+                    else:
+                        power_change = 0
+
+                    # اعمال فیلتر
+                    if power_change >= min_power_change and money_flow >= min_money_flow:
+                        current['تغییر_قدرت_خریدار_درصد'] = power_change
+                        current['قدرت_خریدار_اولیه'] = initial_power
+                        filtered.append(current)
+
+            if not filtered:
+                await update.message.reply_text(
+                    f"📭 هیچ نمادی با شرایط زیر پیدا نشد:\n\n"
+                    f"📈 تغییر قدرت: >{min_power_change}%\n"
+                    f"💰 ورود پول: >{min_money_flow:,.0f} میلیون",
+                    reply_markup=self.get_main_keyboard()
+                )
+                return
+
+            # مرتب‌سازی بر اساس تغییر قدرت
+            filtered.sort(key=lambda x: x['تغییر_قدرت_خریدار_درصد'], reverse=True)
+
+            # ذخیره در Excel
+            self.stock_filter.excel_manager.create_summary_sheet(filtered)
+
+            # نمایش نتایج
+            result = f"⚙️ فیلتر سفارشی\n\n"
+            result += f"📊 شرایط:\n"
+            result += f"• تغییر قدرت: >{min_power_change}%\n"
+            result += f"• ورود پول: >{min_money_flow:,.0f} م\n\n"
+            result += f"🎯 {len(filtered)} نماد فیلتر شده\n"
+            result += f"🕐 {datetime.now().strftime('%H:%M:%S')}\n\n"
+
+            for i, item in enumerate(filtered[:10], 1):
+                result += f"{i}. {item['نماد']}\n"
+                result += f"   📈 تغییر قدرت: {item['تغییر_قدرت_خریدار_درصد']:.1f}%\n"
+                result += f"   💪 قدرت صبح: {item['قدرت_خریدار_اولیه']:.2f}\n"
+                result += f"   💪 قدرت الان: {item['قدرت_خریدار']:.2f}\n"
+                result += f"   💰 ورود پول: {item['ورود_پول_خالص_میلیون']:,.0f} م\n\n"
+
+            if len(filtered) > 10:
+                result += f"و {len(filtered) - 10} نماد دیگر..."
+
+            await update.message.reply_text(result, reply_markup=self.get_main_keyboard())
+
+        except Exception as e:
+            await update.message.reply_text(
+                f"❌ خطا: {str(e)}",
+                reply_markup=self.get_main_keyboard()
             )
 
     async def excel_callback(self, query, context):
@@ -1408,6 +1535,36 @@ class BourseBot:
 
             # پاک کردن state
             context.user_data.pop('waiting_for', None)
+
+        elif waiting_for == 'custom_filter_params':
+            text = update.message.text.strip()
+
+            try:
+                # Parse two numbers
+                parts = text.split()
+                if len(parts) != 2:
+                    await update.message.reply_text(
+                        "❌ فرمت نادرست!\n\n"
+                        "لطفا دو عدد وارد کنید:\n"
+                        "درصد_تغییر ورود_پول\n\n"
+                        "مثال: 15 500"
+                    )
+                    return
+
+                min_power_change = float(parts[0])
+                min_money_flow = float(parts[1])
+
+                # Clear state
+                context.user_data.pop('waiting_for', None)
+
+                # Apply filter
+                await self.apply_custom_filter(update, context, min_power_change, min_money_flow)
+
+            except ValueError:
+                await update.message.reply_text(
+                    "❌ لطفا فقط عدد وارد کنید\n\n"
+                    "مثال: 15 500"
+                )
 
     async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """لغو عملیات جاری"""
