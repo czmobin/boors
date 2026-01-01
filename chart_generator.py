@@ -148,17 +148,36 @@ class ChartGenerator:
             return None
 
         # استخراج داده‌ها
-        names = [item[1].get('نماد', item[0])[:10] for item in top_items]  # محدود کردن طول نام
-        powers = [item[1].get('قدرت_خریدار', 0) for item in top_items]
+        names = []
+        powers = []
+
+        for item in top_items:
+            # item[0] = کد نماد، item[1] = دیکشنری داده‌ها
+            symbol_data = item[1]
+            symbol_name = symbol_data.get('نماد', 'N/A')
+            symbol_power = symbol_data.get('قدرت_خریدار', 0)
+
+            # محدود کردن طول نام برای نمایش بهتر
+            if len(symbol_name) > 10:
+                symbol_name = symbol_name[:10]
+
+            names.append(symbol_name)
+            powers.append(symbol_power)
+
+        # معکوس کردن لیست برای نمایش صحیح (بزرگترین بالا)
+        # چون barh از پایین به بالا نمایش میده
+        names.reverse()
+        powers.reverse()
 
         # ساخت نمودار میله‌ای
         fig, ax = plt.subplots(figsize=(10, 6))
 
         bars = ax.barh(names, powers, color='#4CAF50')
 
-        # رنگ‌آمیزی gradient
+        # رنگ‌آمیزی gradient (معکوس برای نمایش صحیح - بزرگترین پررنگ‌تر)
         for i, bar in enumerate(bars):
-            bar.set_color(plt.cm.Greens(0.4 + (i / len(bars)) * 0.6))
+            # از بالا به پایین رنگ کم‌رنگ‌تر میشه
+            bar.set_color(plt.cm.Greens(1.0 - (i / len(bars)) * 0.6))
 
         ax.set_xlabel('Buyer Power', fontsize=12)
         ax.set_title(f'Top {top_n} Symbols by Buyer Power', fontsize=14, fontweight='bold')
