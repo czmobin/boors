@@ -1188,22 +1188,44 @@ class BourseBot:
 
     async def add_symbol_callback(self, query, context):
         """شروع فرایند اضافه کردن نماد"""
-        context.user_data['waiting_for'] = 'add_symbol'
+        # ابتدا لیست نمادها رو بگیر
+        await query.edit_message_text("🔍 در حال دریافت لیست نمادها...")
 
-        text = """➕ اضافه کردن نماد جدید
+        try:
+            # از همون API که برای اسکن استفاده می‌کنیم
+            all_symbols = self.stock_filter.api_client.get_all_symbols()
 
-لطفا نماد (ticker) را ارسال کنید:
+            if not all_symbols:
+                await query.edit_message_text(
+                    "❌ خطا در دریافت لیست نمادها\n\nلطفا دوباره تلاش کنید",
+                    reply_markup=self.get_manage_symbols_keyboard()
+                )
+                return
+
+            # ذخیره در context برای استفاده بعدی
+            context.user_data['all_symbols_cache'] = all_symbols
+            context.user_data['waiting_for'] = 'add_symbol'
+
+            text = f"""➕ اضافه کردن نماد جدید
+
+✅ {len(all_symbols)} نماد آماده است
+
+لطفا نماد (ticker) را دقیق ارسال کنید:
 
 مثال:
 وبملت
-نماد
-کیان
-
-ربات خودکار نام کامل را پیدا می‌کند.
+شپنا
+کگل
 
 برای لغو، /cancel را ارسال کنید."""
 
-        await query.edit_message_text(text)
+            await query.edit_message_text(text)
+
+        except Exception as e:
+            await query.edit_message_text(
+                f"❌ خطا در دریافت لیست نمادها\n\n{str(e)}",
+                reply_markup=self.get_manage_symbols_keyboard()
+            )
 
     async def remove_symbol_callback(self, query, context):
         """نمایش لیست نمادها برای حذف"""
@@ -1310,108 +1332,77 @@ class BourseBot:
                         context.user_data.pop('waiting_for', None)
                         return
 
-            # Auto-search از TSETMC
-            ticker = text
+            # جستجو در cache (از BrsApi data)
+            ticker_search = text.strip()  # حفظ حروف کوچک و بزرگ برای جستجو
+            all_symbols = context.user_data.get('all_symbols_cache', [])
 
-            # نمایش پیام در حال جستجو
-            search_msg = await update.message.reply_text(f"🔍 در حال جستجوی '{ticker}'...")
-
-            try:
-                # جستجو برای نماد با retry
-                import requests
-                import time
-
-                search_url = f"https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/{ticker}"
-                headers = {
-                    'accept': 'application/json, text/plain, */*',
-                    'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }
-
-                # Retry mechanism
-                max_retries = 3
-                data = None
-                last_error = None
-
-                for attempt in range(max_retries):
-                    try:
-                        response = requests.get(search_url, headers=headers, timeout=20)
-                        response.raise_for_status()
-                        data = response.json()
-                        break  # Success
-                    except requests.exceptions.Timeout:
-                        last_error = "Timeout"
-                        if attempt < max_retries - 1:
-                            time.sleep(1)  # Wait before retry
-                            continue
-                    except Exception as e:
-                        last_error = str(e)
-                        break
-
-                if data and 'instrumentSearch' in data and data['instrumentSearch']:
-                    # اولین نتیجه را بگیر
-                    first_result = data['instrumentSearch'][0]
-                    name = first_result.get('lVal30', ticker)
-                    found_ticker = first_result.get('lVal18', ticker)
-
-                    # حذف پیام جستجو
-                    try:
-                        await search_msg.delete()
-                    except:
-                        pass
-
-                    # اضافه کردن نماد
-                    success = self.stock_filter.add_symbol(name, found_ticker)
-
-                    if success:
-                        symbols = self.stock_filter.get_symbols()
-                        await update.message.reply_text(
-                            f"✅ نماد اضافه شد\n\n"
-                            f"📌 نماد: {found_ticker}\n"
-                            f"📄 نام: {name}\n\n"
-                            f"📊 تعداد کل نمادها: {len(symbols)}",
-                            reply_markup=self.get_main_keyboard()
-                        )
-                    else:
-                        await update.message.reply_text(
-                            f"❌ نماد {found_ticker} قبلا وجود دارد",
-                            reply_markup=self.get_main_keyboard()
-                        )
-                else:
-                    try:
-                        await search_msg.delete()
-                    except:
-                        pass
-
-                    if last_error == "Timeout":
-                        await update.message.reply_text(
-                            f"⏱ سرور TSETMC پاسخ نداد\n\n"
-                            f"💡 می‌توانید نام کامل را وارد کنید:\n"
-                            f"نام کامل | {ticker}\n\n"
-                            f"مثال:\n"
-                            f"بانک ملت | {ticker}",
-                            reply_markup=self.get_main_keyboard()
-                        )
-                    else:
-                        await update.message.reply_text(
-                            f"❌ نمادی با نام '{ticker}' پیدا نشد\n\n"
-                            f"💡 می‌توانید نام کامل را وارد کنید:\n"
-                            f"نام کامل | {ticker}\n\n"
-                            f"مثال:\n"
-                            f"بانک ملت | {ticker}",
-                            reply_markup=self.get_main_keyboard()
-                        )
-
-            except Exception as e:
-                try:
-                    await search_msg.delete()
-                except:
-                    pass
+            if not all_symbols:
                 await update.message.reply_text(
-                    f"❌ خطا در جستجو\n\n"
-                    f"💡 می‌توانید نام کامل را وارد کنید:\n"
-                    f"نام کامل | {ticker}\n\n"
-                    f"مثال:\n"
-                    f"بانک ملت | {ticker}",
+                    "❌ لیست نمادها موجود نیست\n\nلطفا دوباره تلاش کنید",
+                    reply_markup=self.get_main_keyboard()
+                )
+                context.user_data.pop('waiting_for', None)
+                return
+
+            # جستجوی exact match (case-insensitive)
+            found = None
+            for symbol in all_symbols:
+                # l18 = ticker, l30 = name
+                symbol_ticker = symbol.get('l18', '').strip()
+                if symbol_ticker == ticker_search:
+                    found = symbol
+                    break
+
+            if found:
+                # نماد پیدا شد!
+                name = found.get('l30', ticker_search)
+                found_ticker = found.get('l18', ticker_search)
+
+                # اضافه کردن نماد
+                success = self.stock_filter.add_symbol(name, found_ticker)
+
+                if success:
+                    symbols = self.stock_filter.get_symbols()
+                    await update.message.reply_text(
+                        f"✅ نماد اضافه شد\n\n"
+                        f"📌 نماد: {found_ticker}\n"
+                        f"📄 نام: {name}\n\n"
+                        f"📊 تعداد کل نمادها: {len(symbols)}",
+                        reply_markup=self.get_main_keyboard()
+                    )
+                else:
+                    await update.message.reply_text(
+                        f"❌ نماد {found_ticker} قبلا وجود دارد",
+                        reply_markup=self.get_main_keyboard()
+                    )
+            else:
+                # جستجوی نمادهای مشابه
+                similar = []
+                ticker_upper = ticker_search.upper()
+                for symbol in all_symbols:
+                    symbol_ticker = symbol.get('l18', '').strip()
+                    symbol_name = symbol.get('l30', '').strip()
+                    # جستجو در ticker یا name
+                    if (ticker_upper in symbol_ticker.upper() or
+                        ticker_upper in symbol_name.upper()):
+                        similar.append(symbol)
+                        if len(similar) >= 10:  # حداکثر 10 نماد مشابه
+                            break
+
+                if similar:
+                    msg = f"❌ نماد '{text}' دقیق پیدا نشد\n\n"
+                    msg += "📋 نمادهای مشابه:\n\n"
+                    for s in similar:
+                        msg += f"• {s.get('l18', 'N/A')} - {s.get('l30', 'N/A')[:35]}\n"
+                    msg += "\n💡 نماد دقیق را از لیست بالا وارد کنید"
+                else:
+                    msg = f"❌ نماد '{text}' پیدا نشد\n\n"
+                    msg += "💡 نماد دقیق را وارد کنید\n"
+                    msg += "یا از فرمت manual استفاده کنید:\n"
+                    msg += f"نام کامل | {text}"
+
+                await update.message.reply_text(
+                    msg,
                     reply_markup=self.get_main_keyboard()
                 )
 
