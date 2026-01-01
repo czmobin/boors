@@ -8,6 +8,7 @@ import asyncio
 from datetime import datetime
 from typing import List, Dict
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.error import BadRequest, TimedOut
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -1275,36 +1276,88 @@ class BourseBot:
         waiting_for = context.user_data.get('waiting_for')
 
         if waiting_for == 'add_symbol':
-            ticker = update.message.text.strip()
+            text = update.message.text.strip()
 
-            if not ticker:
+            if not text:
                 await update.message.reply_text("❌ نماد نمی‌تواند خالی باشد")
                 return
+
+            # چک کن اگر فرمت manual (نام | ticker) استفاده شده
+            if '|' in text:
+                parts = text.split('|')
+                if len(parts) == 2:
+                    name = parts[0].strip()
+                    ticker = parts[1].strip()
+
+                    if name and ticker:
+                        success = self.stock_filter.add_symbol(name, ticker)
+
+                        if success:
+                            symbols = self.stock_filter.get_symbols()
+                            await update.message.reply_text(
+                                f"✅ نماد اضافه شد\n\n"
+                                f"📌 نماد: {ticker}\n"
+                                f"📄 نام: {name}\n\n"
+                                f"📊 تعداد کل نمادها: {len(symbols)}",
+                                reply_markup=self.get_main_keyboard()
+                            )
+                        else:
+                            await update.message.reply_text(
+                                f"❌ نماد {ticker} قبلا وجود دارد",
+                                reply_markup=self.get_main_keyboard()
+                            )
+
+                        context.user_data.pop('waiting_for', None)
+                        return
+
+            # Auto-search از TSETMC
+            ticker = text
 
             # نمایش پیام در حال جستجو
             search_msg = await update.message.reply_text(f"🔍 در حال جستجوی '{ticker}'...")
 
             try:
-                # جستجو برای نماد
+                # جستجو برای نماد با retry
                 import requests
+                import time
+
                 search_url = f"https://cdn.tsetmc.com/api/Instrument/GetInstrumentSearch/{ticker}"
                 headers = {
                     'accept': 'application/json, text/plain, */*',
                     'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
                 }
 
-                response = requests.get(search_url, headers=headers, timeout=10)
-                response.raise_for_status()
-                data = response.json()
+                # Retry mechanism
+                max_retries = 3
+                data = None
+                last_error = None
 
-                if 'instrumentSearch' in data and data['instrumentSearch']:
+                for attempt in range(max_retries):
+                    try:
+                        response = requests.get(search_url, headers=headers, timeout=20)
+                        response.raise_for_status()
+                        data = response.json()
+                        break  # Success
+                    except requests.exceptions.Timeout:
+                        last_error = "Timeout"
+                        if attempt < max_retries - 1:
+                            time.sleep(1)  # Wait before retry
+                            continue
+                    except Exception as e:
+                        last_error = str(e)
+                        break
+
+                if data and 'instrumentSearch' in data and data['instrumentSearch']:
                     # اولین نتیجه را بگیر
                     first_result = data['instrumentSearch'][0]
                     name = first_result.get('lVal30', ticker)
                     found_ticker = first_result.get('lVal18', ticker)
 
                     # حذف پیام جستجو
-                    await search_msg.delete()
+                    try:
+                        await search_msg.delete()
+                    except:
+                        pass
 
                     # اضافه کردن نماد
                     success = self.stock_filter.add_symbol(name, found_ticker)
@@ -1324,18 +1377,41 @@ class BourseBot:
                             reply_markup=self.get_main_keyboard()
                         )
                 else:
-                    await search_msg.delete()
-                    await update.message.reply_text(
-                        f"❌ نمادی با نام '{ticker}' پیدا نشد\n\n"
-                        f"لطفا نام دقیق نماد را وارد کنید",
-                        reply_markup=self.get_main_keyboard()
-                    )
+                    try:
+                        await search_msg.delete()
+                    except:
+                        pass
+
+                    if last_error == "Timeout":
+                        await update.message.reply_text(
+                            f"⏱ سرور TSETMC پاسخ نداد\n\n"
+                            f"💡 می‌توانید نام کامل را وارد کنید:\n"
+                            f"نام کامل | {ticker}\n\n"
+                            f"مثال:\n"
+                            f"بانک ملت | {ticker}",
+                            reply_markup=self.get_main_keyboard()
+                        )
+                    else:
+                        await update.message.reply_text(
+                            f"❌ نمادی با نام '{ticker}' پیدا نشد\n\n"
+                            f"💡 می‌توانید نام کامل را وارد کنید:\n"
+                            f"نام کامل | {ticker}\n\n"
+                            f"مثال:\n"
+                            f"بانک ملت | {ticker}",
+                            reply_markup=self.get_main_keyboard()
+                        )
 
             except Exception as e:
-                await search_msg.delete()
+                try:
+                    await search_msg.delete()
+                except:
+                    pass
                 await update.message.reply_text(
-                    f"❌ خطا در جستجو: {str(e)}\n\n"
-                    f"لطفا دوباره تلاش کنید",
+                    f"❌ خطا در جستجو\n\n"
+                    f"💡 می‌توانید نام کامل را وارد کنید:\n"
+                    f"نام کامل | {ticker}\n\n"
+                    f"مثال:\n"
+                    f"بانک ملت | {ticker}",
                     reply_markup=self.get_main_keyboard()
                 )
 
@@ -1354,15 +1430,28 @@ class BourseBot:
         """مدیریت خطاها"""
         print(f"Error: {context.error}")
 
-        if update and update.callback_query:
-            await update.callback_query.edit_message_text(
-                "❌ خطایی رخ داد",
-                reply_markup=self.get_back_button()
-            )
-        elif update and update.message:
-            await update.message.reply_text(
-                "❌ خطایی رخ داد. لطفا دوباره تلاش کنید."
-            )
+        # Skip certain errors
+        if isinstance(context.error, BadRequest):
+            if "Message is not modified" in str(context.error):
+                # پیام تغییری نکرده، نادیده بگیر
+                return
+            if "Query is too old" in str(context.error):
+                # کوئری خیلی قدیمیه، نادیده بگیر
+                return
+
+        # Handle other errors
+        try:
+            if update and update.callback_query:
+                try:
+                    await update.callback_query.answer("❌ خطایی رخ داد", show_alert=True)
+                except:
+                    pass
+            elif update and update.message:
+                await update.message.reply_text(
+                    "❌ خطایی رخ داد. لطفا دوباره تلاش کنید."
+                )
+        except Exception as e:
+            print(f"Error in error handler: {e}")
 
     async def setup_bot_commands(self):
         """ثبت کامندها در منوی تلگرام"""
