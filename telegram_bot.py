@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 import pytz
+import jdatetime
 
 from stock_filter import StockFilter
 from find_symbol import search_symbol as find_symbol_code
@@ -505,6 +506,112 @@ class BourseBot:
         except Exception as e:
             await msg.edit_text(f"❌ خطا: {str(e)}")
 
+    async def scanshamsi_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """دستور /scanshamsi - اسکن با تاریخ شمسی"""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        if not context.args:
+            await update.message.reply_text(
+                "❌ لطفا تاریخ شمسی را وارد کنید.\n"
+                "📅 فرمت: YYYY/MM/DD یا YYYY-MM-DD\n\n"
+                "مثال:\n"
+                "/scanshamsi 1404/10/10\n"
+                "/scanshamsi 1404-10-10"
+            )
+            return
+
+        shamsi_date = context.args[0]
+
+        # تبدیل / به - برای سازگاری
+        shamsi_date = shamsi_date.replace('/', '-')
+
+        # بررسی فرمت
+        import re
+        if not re.match(r'^\d{4}-\d{1,2}-\d{1,2}$', shamsi_date):
+            await update.message.reply_text(
+                "❌ فرمت تاریخ اشتباه است!\n"
+                "📅 فرمت صحیح: YYYY/MM/DD\n\n"
+                "مثال: /scanshamsi 1404/10/10"
+            )
+            return
+
+        try:
+            # تجزیه تاریخ شمسی
+            parts = shamsi_date.split('-')
+            year = int(parts[0])
+            month = int(parts[1])
+            day = int(parts[2])
+
+            # تبدیل به میلادی
+            jdate = jdatetime.date(year, month, day)
+            gregorian_date = jdate.togregorian()
+            miladi_str = gregorian_date.strftime('%Y-%m-%d')
+
+            msg = await update.message.reply_text(
+                f"📅 تاریخ شمسی: {year}/{month}/{day}\n"
+                f"📅 تاریخ میلادی: {miladi_str}\n\n"
+                f"⏱ در حال اسکن..."
+            )
+
+            # اجرای اسکن
+            data = self.stock_filter.fetch_and_calculate(force_refresh=True, date=miladi_str)
+
+            if not data:
+                await msg.edit_text(
+                    f"❌ خطا در دریافت داده‌های {year}/{month}/{day}\n\n"
+                    "احتمالاً:\n"
+                    "• API این تاریخ را پشتیبانی نمی‌کند\n"
+                    "• تاریخ تعطیل بورس بوده\n"
+                    "• تاریخ در آینده است"
+                )
+                return
+
+            # ذخیره در Excel
+            original_filename = self.stock_filter.excel_manager.filename
+            date_filename = original_filename.replace(
+                datetime.now().strftime('%Y-%m-%d'),
+                f"{year}-{month:02d}-{day:02d}_shamsi"
+            )
+            self.stock_filter.excel_manager.filename = date_filename
+            self.stock_filter.excel_manager.save_data(data)
+            self.stock_filter.excel_manager.filename = original_filename
+
+            # مرتب‌سازی
+            data_sorted = sorted(data, key=lambda x: x.get('قدرت_خریدار', 0), reverse=True)
+            top_5 = data_sorted[:5]
+
+            result = f"✅ اسکن تاریخ {year}/{month}/{day} انجام شد\n"
+            result += f"📅 میلادی: {miladi_str}\n\n"
+            result += f"📊 تعداد: {len(data)} نماد\n\n"
+            result += "🔝 5 نماد برتر:\n\n"
+
+            for i, item in enumerate(top_5, 1):
+                result += f"{i}. {item['نماد']}\n"
+                result += f"   💪 {item['قدرت_خریدار']}\n"
+                result += f"   💰 {item['ورود_پول_خالص_میلیون']:,.0f} م\n\n"
+
+            result += f"\n📁 فایل Excel ذخیره شد"
+
+            await msg.edit_text(result)
+
+            # ارسال فایل
+            if os.path.exists(date_filename):
+                await update.message.reply_document(
+                    document=open(date_filename, 'rb'),
+                    filename=os.path.basename(date_filename),
+                    caption=f"📊 گزارش {year}/{month}/{day}"
+                )
+
+        except ValueError as e:
+            await update.message.reply_text(
+                f"❌ تاریخ نامعتبر: {shamsi_date}\n\n"
+                "لطفا تاریخ صحیح وارد کنید.\n"
+                "مثال: /scanshamsi 1404/10/10"
+            )
+        except Exception as e:
+            await update.message.reply_text(f"❌ خطا: {str(e)}")
+
     async def stats_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """دستور /stats - نمایش آمار"""
         if not self.is_authorized(update.effective_user.id):
@@ -576,8 +683,9 @@ class BourseBot:
 
         # ساعات کاری بورس: شنبه تا چهارشنبه 9:00-12:30
         # هر 5 دقیقه
+        # روزها: sat=5, sun=6, mon=0, tue=1, wed=2
         trigger = CronTrigger(
-            day_of_week='sat-wed',  # شنبه تا چهارشنبه
+            day_of_week='sat,sun,mon,tue,wed',  # شنبه تا چهارشنبه
             hour='9-12',
             minute='*/5',
             timezone=pytz.timezone('Asia/Tehran')
@@ -939,6 +1047,7 @@ class BourseBot:
         self.app.add_handler(CommandHandler("symbols", self.symbols_command))
         self.app.add_handler(CommandHandler("search", self.search_command))
         self.app.add_handler(CommandHandler("scandate", self.scandate_command))
+        self.app.add_handler(CommandHandler("scanshamsi", self.scanshamsi_command))
         self.app.add_handler(CommandHandler("stats", self.stats_command))
 
         # Error handler
