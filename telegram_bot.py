@@ -7,7 +7,7 @@ import os
 import asyncio
 from datetime import datetime
 from typing import List, Dict
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -1032,6 +1032,23 @@ class BourseBot:
                 "❌ خطایی رخ داد. لطفا دوباره تلاش کنید."
             )
 
+    async def setup_bot_commands(self):
+        """ثبت کامندها در منوی تلگرام"""
+        commands = [
+            BotCommand("start", "شروع و نمایش منوی اصلی"),
+            BotCommand("help", "راهنمای استفاده از ربات"),
+            BotCommand("scan", "اسکن و فیلتر نمادها"),
+            BotCommand("filter", "نمایش نمادهای فیلتر شده"),
+            BotCommand("excel", "دریافت فایل اکسل"),
+            BotCommand("symbols", "لیست نمادهای تحت پوشش"),
+            BotCommand("search", "جستجوی نماد (مثال: /search وبملت)"),
+            BotCommand("scandate", "اسکن تاریخی با تاریخ میلادی (مثال: /scandate 2024-12-20)"),
+            BotCommand("scanshamsi", "اسکن تاریخی با تاریخ شمسی (مثال: /scanshamsi 1403-09-29)"),
+            BotCommand("stats", "نمایش آمار"),
+            BotCommand("reset", "ریست داده‌ها"),
+        ]
+        await self.app.bot.set_my_commands(commands)
+
     def run(self):
         """راه‌اندازی ربات"""
         self.app = Application.builder().token(self.bot_token).build()
@@ -1060,6 +1077,10 @@ class BourseBot:
             print(f"🔐 کاربران مجاز: {self.authorized_users}")
         else:
             print("⚠️  هشدار: همه کاربران مجاز هستند!")
+
+        # ثبت کامندها در منوی تلگرام
+        asyncio.get_event_loop().run_until_complete(self.setup_bot_commands())
+        print("✅ کامندها در منوی تلگرام ثبت شدند")
 
         # شروع polling
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
