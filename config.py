@@ -24,6 +24,12 @@ EXCEL_FILENAME_TEMPLATE = "bourse_data_{date}.xlsx"
 # تنظیمات فیلتر
 MIN_BUYER_POWER_GROWTH = 0.1  # حداقل 10% رشد قدرت خریدار نسبت به ابتدای روز
 
+# تنظیمات فیلتر پیشرفته (با شیب)
+MIN_POSITIVE_GROWTH = 0.0  # حداقل رشد مثبت
+MIN_SIGNIFICANT_GROWTH = 0.1  # حداقل 10% رشد قابل توجه
+MAX_HISTORY_SIZE = 10  # تعداد snapshot‌های نگهداری شده برای محاسبه شیب
+MIN_SLOPE_SAMPLES = 3  # حداقل تعداد نمونه برای محاسبه شیب معتبر
+
 # هدرهای HTTP (برای جلوگیری از block شدن)
 HEADERS = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 OPR/106.0.0.0',

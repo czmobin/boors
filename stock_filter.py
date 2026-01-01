@@ -5,10 +5,17 @@
 import json
 from typing import List, Dict, Optional
 from datetime import datetime
+from collections import deque
 from brsapi_client import BrsApiClient
 from calculator import BourseCalculator
 from excel_manager import ExcelManager
-from config import MIN_BUYER_POWER_GROWTH
+from config import (
+    MIN_BUYER_POWER_GROWTH,
+    MIN_POSITIVE_GROWTH,
+    MIN_SIGNIFICANT_GROWTH,
+    MAX_HISTORY_SIZE,
+    MIN_SLOPE_SAMPLES
+)
 
 
 class StockFilter:
@@ -25,6 +32,10 @@ class StockFilter:
         # Cache برای داده‌های تمام نمادها
         self.all_symbols_cache = None
         self.cache_time = None
+
+        # History برای محاسبه شیب (تغییرات زمانی)
+        # هر آیتم: {'timestamp': datetime, 'data': {code: {'قدرت_خریدار': ...}}}
+        self.history = deque(maxlen=MAX_HISTORY_SIZE)
 
     def _load_symbols(self) -> List[Dict]:
         """
@@ -213,6 +224,11 @@ class StockFilter:
                 continue
 
         print(f"\n✅ پردازش کامل شد: {len(results)} نماد")
+
+        # اضافه کردن به history (فقط برای اسکن‌های فعلی، نه تاریخی)
+        if not date and results:
+            self.add_to_history(results)
+
         return results
 
     def filter_by_growth(self, current_data: List[Dict]) -> List[Dict]:
@@ -426,3 +442,141 @@ class StockFilter:
             لیست نمادها
         """
         return self.symbols
+
+    # متدهای مدیریت History و محاسبه شیب
+    def add_to_history(self, data: List[Dict]) -> None:
+        """
+        اضافه کردن snapshot جدید به history
+
+        Args:
+            data: لیست داده‌های نمادها
+        """
+        snapshot = {
+            'timestamp': datetime.now(),
+            'data': {item['کد']: item for item in data}
+        }
+        self.history.append(snapshot)
+        print(f"📊 History updated: {len(self.history)} snapshots")
+
+    def calculate_slope(self, symbol_code: str) -> Optional[float]:
+        """
+        محاسبه شیب تغییرات قدرت خریدار برای یک نماد
+
+        از رگرسیون خطی ساده استفاده می‌کنیم
+
+        Args:
+            symbol_code: کد نماد
+
+        Returns:
+            شیب (مثبت = رو به بالا، منفی = رو به پایین، None = داده کافی نیست)
+        """
+        if len(self.history) < MIN_SLOPE_SAMPLES:
+            return None
+
+        # استخراج نقاط (timestamp, قدرت_خریدار)
+        points = []
+        for snapshot in self.history:
+            if symbol_code in snapshot['data']:
+                power = snapshot['data'][symbol_code].get('قدرت_خریدار', 0)
+                timestamp = snapshot['timestamp']
+                points.append((timestamp, power))
+
+        if len(points) < MIN_SLOPE_SAMPLES:
+            return None
+
+        # محاسبه شیب با رگرسیون خطی
+        # تبدیل timestamp به عدد (ثانیه از اولین نقطه)
+        base_time = points[0][0]
+        x_values = [(p[0] - base_time).total_seconds() for p in points]
+        y_values = [p[1] for p in points]
+
+        n = len(points)
+        sum_x = sum(x_values)
+        sum_y = sum(y_values)
+        sum_xy = sum(x * y for x, y in zip(x_values, y_values))
+        sum_x2 = sum(x * x for x in x_values)
+
+        # فرمول شیب: (n*sum_xy - sum_x*sum_y) / (n*sum_x2 - sum_x^2)
+        denominator = n * sum_x2 - sum_x * sum_x
+        if denominator == 0:
+            return 0
+
+        slope = (n * sum_xy - sum_x * sum_y) / denominator
+        return slope
+
+    def filter_with_slope(self, data: List[Dict], filter_type: str = 'positive_gentle') -> List[Dict]:
+        """
+        فیلتر نمادها بر اساس رشد و شیب
+
+        Args:
+            data: داده‌های فعلی
+            filter_type: نوع فیلتر
+                - 'positive_gentle': رشد مثبت با شیب ملایم (>0)
+                - 'significant_upward': رشد بیش از 10% با شیب رو به بالا
+
+        Returns:
+            لیست نمادهای فیلتر شده
+        """
+        if not self.initial_data:
+            print("⚠️  داده اولیه موجود نیست. ابتدا یک اسکن اولیه انجام دهید.")
+            return []
+
+        filtered = []
+
+        for current in data:
+            symbol_code = current['کد']
+            symbol_name = current['نماد']
+
+            # پیدا کردن داده اولیه
+            initial = self.initial_data.get(symbol_code)
+            if not initial:
+                continue
+
+            initial_power = initial.get('قدرت_خریدار', 0)
+            current_power = current.get('قدرت_خریدار', 0)
+
+            # محاسبه درصد رشد
+            growth = self.calculator.calculate_growth(initial_power, current_power)
+
+            # محاسبه شیب
+            slope = self.calculate_slope(symbol_code)
+
+            # اضافه کردن اطلاعات به داده
+            current['رشد_قدرت_خریدار_درصد'] = growth
+            current['قدرت_خریدار_اولیه'] = initial_power
+            current['شیب'] = slope if slope is not None else 0
+
+            # اعمال فیلتر بر اساس نوع
+            if filter_type == 'positive_gentle':
+                # رشد مثبت با شیب مثبت
+                if growth > MIN_POSITIVE_GROWTH and (slope is None or slope >= 0):
+                    filtered.append(current)
+
+            elif filter_type == 'significant_upward':
+                # رشد بیش از 10% با شیب مثبت
+                if growth >= MIN_SIGNIFICANT_GROWTH * 100 and (slope is None or slope > 0):
+                    filtered.append(current)
+
+        # مرتب‌سازی بر اساس رشد (نزولی)
+        filtered.sort(key=lambda x: x['رشد_قدرت_خریدار_درصد'], reverse=True)
+
+        return filtered
+
+    def get_filtered_summary(self) -> Dict[str, List[Dict]]:
+        """
+        دریافت خلاصه همه فیلترها
+
+        Returns:
+            دیکشنری شامل نتایج فیلترهای مختلف
+        """
+        if not self.all_symbols_cache:
+            print("⚠️  ابتدا یک اسکن انجام دهید")
+            return {}
+
+        data = self.all_symbols_cache
+
+        return {
+            'positive_gentle': self.filter_with_slope(data, 'positive_gentle'),
+            'significant_upward': self.filter_with_slope(data, 'significant_upward'),
+            'all_growth': self.filter_by_growth(data)  # فیلتر قدیمی
+        }

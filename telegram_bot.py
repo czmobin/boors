@@ -109,6 +109,24 @@ class BourseBot:
         ]
         return InlineKeyboardMarkup(keyboard)
 
+    def get_filter_menu_keyboard(self) -> InlineKeyboardMarkup:
+        """ساخت کیبورد انتخاب نوع فیلتر"""
+        keyboard = [
+            [
+                InlineKeyboardButton("📈 رشد مثبت (شیب ملایم)", callback_data="filter_positive_gentle"),
+            ],
+            [
+                InlineKeyboardButton("🚀 رشد قوی +10% (شیب رو به بالا)", callback_data="filter_significant"),
+            ],
+            [
+                InlineKeyboardButton("📊 همه رشدها (فیلتر ساده)", callback_data="filter_all_growth"),
+            ],
+            [
+                InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_main"),
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """دستور /start"""
         user_id = update.effective_user.id
@@ -791,6 +809,15 @@ class BourseBot:
         elif action == "list_symbols":
             # لیست نمادها
             await self.list_symbols_callback(query, context)
+        elif action == "filter_positive_gentle":
+            # فیلتر رشد مثبت با شیب ملایم
+            await self.apply_filter(query, context, 'positive_gentle')
+        elif action == "filter_significant":
+            # فیلتر رشد قوی +10%
+            await self.apply_filter(query, context, 'significant_upward')
+        elif action == "filter_all_growth":
+            # فیلتر ساده همه رشدها
+            await self.apply_filter(query, context, 'all_growth')
         elif action == "back_to_main":
             # بازگشت به منوی اصلی
             await query.edit_message_text(
@@ -882,7 +909,7 @@ class BourseBot:
             )
 
     async def filter_callback(self, query, context):
-        """فیلتر نمادها از طریق callback"""
+        """نمایش منوی انتخاب نوع فیلتر"""
         if not self.stock_filter.initial_data:
             await query.edit_message_text(
                 "⚠️ هنوز اسکن اولیه انجام نشده\n\n"
@@ -891,6 +918,23 @@ class BourseBot:
             )
             return
 
+        # نمایش منوی انتخاب فیلتر
+        history_count = len(self.stock_filter.history)
+        text = "📊 انتخاب نوع فیلتر\n\n"
+
+        if history_count >= 3:
+            text += f"✅ داده کافی برای شیب ({history_count} snapshot)\n\n"
+        else:
+            text += f"⚠️ برای شیب دقیق‌تر، {3 - history_count} اسکن دیگر نیاز است\n\n"
+
+        text += "🔹 رشد مثبت: نمادهایی با رشد >0 و روند مثبت\n"
+        text += "🔹 رشد قوی: نمادهایی با رشد >10% و شیب تند به بالا\n"
+        text += "🔹 همه رشدها: فیلتر ساده بدون بررسی شیب\n"
+
+        await query.edit_message_text(text, reply_markup=self.get_filter_menu_keyboard())
+
+    async def apply_filter(self, query, context, filter_type: str):
+        """اعمال فیلتر بر اساس نوع انتخاب شده"""
         await query.edit_message_text("🔍 در حال فیلتر...")
 
         try:
@@ -904,26 +948,39 @@ class BourseBot:
                 )
                 return
 
-            # فیلتر کردن
-            filtered = self.stock_filter.filter_by_growth(current_data)
+            # فیلتر کردن بر اساس نوع
+            if filter_type == 'positive_gentle':
+                filtered = self.stock_filter.filter_with_slope(current_data, 'positive_gentle')
+                title = "📈 رشد مثبت (شیب ملایم)"
+            elif filter_type == 'significant_upward':
+                filtered = self.stock_filter.filter_with_slope(current_data, 'significant_upward')
+                title = "🚀 رشد قوی +10%"
+            else:  # all_growth
+                filtered = self.stock_filter.filter_by_growth(current_data)
+                title = "📊 همه رشدها"
 
             if not filtered:
                 await query.edit_message_text(
-                    "📭 هیچ نمادی با رشد +10% پیدا نشد",
-                    reply_markup=self.get_back_button()
+                    f"📭 هیچ نمادی در فیلتر '{title}' پیدا نشد",
+                    reply_markup=self.get_filter_menu_keyboard()
                 )
                 return
 
             # ذخیره در شیت جداگانه
             self.stock_filter.excel_manager.create_summary_sheet(filtered)
 
-            result = f"🎯 {len(filtered)} نماد فیلتر شده\n"
+            result = f"{title}\n"
+            result += f"🎯 {len(filtered)} نماد فیلتر شده\n"
             result += f"🕐 {datetime.now().strftime('%H:%M:%S')}\n\n"
 
             for i, item in enumerate(filtered[:10], 1):
                 result += f"{i}. {item['نماد']}\n"
-                result += f"   📈 {item['رشد_قدرت_خریدار_درصد']:.1f}%\n"
-                result += f"   💰 {item['ورود_پول_خالص_میلیون']:,.0f} م\n\n"
+                result += f"   📈 رشد: {item['رشد_قدرت_خریدار_درصد']:.1f}%\n"
+                result += f"   💰 ورود پول: {item['ورود_پول_خالص_میلیون']:,.0f} م\n"
+                if 'شیب' in item and item['شیب'] != 0:
+                    slope_emoji = "📈" if item['شیب'] > 0 else "📉"
+                    result += f"   {slope_emoji} شیب: {item['شیب']:.4f}\n"
+                result += "\n"
 
             if len(filtered) > 10:
                 result += f"و {len(filtered) - 10} نماد دیگر..."
