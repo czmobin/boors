@@ -300,3 +300,129 @@ class StockFilter:
                 self.excel_manager.create_summary_sheet(filtered)
             else:
                 print(f"\nهیچ نمادی با رشد بیش از {MIN_BUYER_POWER_GROWTH*100}% پیدا نشد")
+
+    # متدهای مدیریت نمادها
+    def add_symbol(self, name: str, ticker: str) -> bool:
+        """
+        اضافه کردن نماد جدید به لیست
+
+        Args:
+            name: نام کامل نماد
+            ticker: نماد کوتاه (ticker)
+
+        Returns:
+            True اگر موفق بود، False در غیر این صورت
+        """
+        try:
+            # بررسی تکراری نبودن ticker
+            for symbol in self.symbols:
+                if symbol.get('ticker', '').strip() == ticker.strip():
+                    print(f"⚠️  نماد {ticker} قبلا وجود دارد")
+                    return False
+
+            # اضافه کردن نماد جدید
+            new_symbol = {
+                "name": name.strip(),
+                "ticker": ticker.strip(),
+                "id": None
+            }
+            self.symbols.append(new_symbol)
+
+            # ذخیره در فایل
+            return self.save_symbols()
+
+        except Exception as e:
+            print(f"❌ خطا در اضافه کردن نماد: {e}")
+            return False
+
+    def remove_symbol(self, ticker: str) -> bool:
+        """
+        حذف نماد از لیست
+
+        Args:
+            ticker: نماد کوتاه برای حذف
+
+        Returns:
+            True اگر موفق بود، False در غیر این صورت
+        """
+        try:
+            # پیدا کردن و حذف نماد
+            initial_count = len(self.symbols)
+            self.symbols = [s for s in self.symbols if s.get('ticker', '').strip() != ticker.strip()]
+
+            if len(self.symbols) == initial_count:
+                print(f"⚠️  نماد {ticker} یافت نشد")
+                return False
+
+            # ذخیره در فایل
+            return self.save_symbols()
+
+        except Exception as e:
+            print(f"❌ خطا در حذف نماد: {e}")
+            return False
+
+    def update_symbol(self, ticker: str, new_name: str) -> bool:
+        """
+        ویرایش نام نماد
+
+        Args:
+            ticker: نماد کوتاه
+            new_name: نام جدید
+
+        Returns:
+            True اگر موفق بود، False در غیر این صورت
+        """
+        try:
+            # پیدا کردن و ویرایش نماد
+            found = False
+            for symbol in self.symbols:
+                if symbol.get('ticker', '').strip() == ticker.strip():
+                    symbol['name'] = new_name.strip()
+                    found = True
+                    break
+
+            if not found:
+                print(f"⚠️  نماد {ticker} یافت نشد")
+                return False
+
+            # ذخیره در فایل
+            return self.save_symbols()
+
+        except Exception as e:
+            print(f"❌ خطا در ویرایش نماد: {e}")
+            return False
+
+    def save_symbols(self) -> bool:
+        """
+        ذخیره لیست نمادها در فایل JSON
+
+        Returns:
+            True اگر موفق بود، False در غیر این صورت
+        """
+        try:
+            # خواندن فایل فعلی برای حفظ کامنت‌ها
+            with open(self.symbols_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            # به‌روزرسانی symbols
+            data['symbols'] = self.symbols
+
+            # ذخیره در فایل
+            with open(self.symbols_file, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+
+            print(f"✅ لیست نمادها ذخیره شد ({len(self.symbols)} نماد)")
+            return True
+
+        except Exception as e:
+            print(f"❌ خطا در ذخیره فایل نمادها: {e}")
+            return False
+
+    def get_symbols(self) -> List[Dict]:
+        """
+        دریافت لیست نمادها
+
+        Returns:
+            لیست نمادها
+        """
+        return self.symbols

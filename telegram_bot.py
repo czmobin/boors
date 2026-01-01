@@ -14,6 +14,7 @@ from telegram.ext import (
     ContextTypes,
     MessageHandler,
     CallbackQueryHandler,
+    ConversationHandler,
     filters
 )
 from dotenv import load_dotenv
@@ -30,6 +31,10 @@ import sys
 
 class BourseBot:
     """کلاس ربات تلگرام برای فیلتر نمادهای بورس"""
+
+    # States برای ConversationHandler
+    WAITING_ADD_SYMBOL = 1
+    WAITING_REMOVE_SYMBOL = 2
 
     def __init__(self):
         load_dotenv()
@@ -76,11 +81,30 @@ class BourseBot:
                 auto_button,
             ],
             [
+                InlineKeyboardButton("✏️ مدیریت نمادها", callback_data="manage_symbols"),
+            ],
+            [
                 InlineKeyboardButton("📈 آمار", callback_data="stats"),
                 InlineKeyboardButton("🔄 ریست", callback_data="reset"),
             ],
             [
                 InlineKeyboardButton("❓ راهنما", callback_data="help"),
+            ]
+        ]
+        return InlineKeyboardMarkup(keyboard)
+
+    def get_manage_symbols_keyboard(self) -> InlineKeyboardMarkup:
+        """ساخت کیبورد مدیریت نمادها"""
+        keyboard = [
+            [
+                InlineKeyboardButton("➕ اضافه کردن", callback_data="add_symbol"),
+                InlineKeyboardButton("➖ حذف", callback_data="remove_symbol"),
+            ],
+            [
+                InlineKeyboardButton("📋 لیست نمادها", callback_data="list_symbols"),
+            ],
+            [
+                InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_main"),
             ]
         ]
         return InlineKeyboardMarkup(keyboard)
@@ -751,6 +775,28 @@ class BourseBot:
             # توقف اسکن اتوماتیک
             msg = self.stop_auto_scan()
             await query.edit_message_text(msg, reply_markup=self.get_main_keyboard())
+        elif action == "manage_symbols":
+            # مدیریت نمادها
+            await self.manage_symbols_callback(query, context)
+        elif action == "add_symbol":
+            # اضافه کردن نماد
+            await self.add_symbol_callback(query, context)
+        elif action == "remove_symbol":
+            # حذف نماد
+            await self.remove_symbol_callback(query, context)
+        elif action.startswith("delete_"):
+            # تایید حذف نماد
+            ticker = action.replace("delete_", "")
+            await self.confirm_remove_symbol(query, context, ticker)
+        elif action == "list_symbols":
+            # لیست نمادها
+            await self.list_symbols_callback(query, context)
+        elif action == "back_to_main":
+            # بازگشت به منوی اصلی
+            await query.edit_message_text(
+                "🤖 منوی اصلی\n\nیک گزینه را انتخاب کنید:",
+                reply_markup=self.get_main_keyboard()
+            )
         elif action == "menu":
             # بازگشت به منوی اصلی
             await query.edit_message_text(
@@ -1018,6 +1064,160 @@ class BourseBot:
 
         await query.edit_message_text(help_text, reply_markup=self.get_back_button())
 
+    # متدهای مدیریت نمادها
+    async def manage_symbols_callback(self, query, context):
+        """نمایش منوی مدیریت نمادها"""
+        symbols = self.stock_filter.get_symbols()
+        text = f"✏️ مدیریت نمادها\n\n"
+        text += f"📊 تعداد نمادها: {len(symbols)}\n\n"
+        text += "یک گزینه را انتخاب کنید:"
+
+        await query.edit_message_text(text, reply_markup=self.get_manage_symbols_keyboard())
+
+    async def add_symbol_callback(self, query, context):
+        """شروع فرایند اضافه کردن نماد"""
+        context.user_data['waiting_for'] = 'add_symbol'
+
+        text = """➕ اضافه کردن نماد جدید
+
+لطفا اطلاعات نماد را به صورت زیر ارسال کنید:
+
+نام نماد | ticker
+
+مثال:
+گروه مالی نماد غدیر | نماد
+
+برای لغو، /cancel را ارسال کنید."""
+
+        await query.edit_message_text(text)
+
+    async def remove_symbol_callback(self, query, context):
+        """نمایش لیست نمادها برای حذف"""
+        symbols = self.stock_filter.get_symbols()
+
+        if not symbols:
+            await query.edit_message_text(
+                "❌ هیچ نمادی برای حذف وجود ندارد",
+                reply_markup=self.get_manage_symbols_keyboard()
+            )
+            return
+
+        # ساخت کیبورد با دکمه‌های حذف
+        keyboard = []
+        for symbol in symbols:
+            ticker = symbol.get('ticker', '')
+            name = symbol.get('name', '')
+            keyboard.append([
+                InlineKeyboardButton(
+                    f"❌ {ticker} - {name[:30]}",
+                    callback_data=f"delete_{ticker}"
+                )
+            ])
+
+        keyboard.append([
+            InlineKeyboardButton("🔙 بازگشت", callback_data="manage_symbols")
+        ])
+
+        await query.edit_message_text(
+            "➖ حذف نماد\n\nیک نماد را برای حذف انتخاب کنید:",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+
+    async def confirm_remove_symbol(self, query, context, ticker: str):
+        """تایید و اجرای حذف نماد"""
+        success = self.stock_filter.remove_symbol(ticker)
+
+        if success:
+            text = f"✅ نماد {ticker} با موفقیت حذف شد"
+        else:
+            text = f"❌ خطا در حذف نماد {ticker}"
+
+        # بازگشت به منوی مدیریت نمادها
+        symbols = self.stock_filter.get_symbols()
+        text += f"\n\n📊 تعداد نمادها: {len(symbols)}"
+
+        await query.edit_message_text(text, reply_markup=self.get_manage_symbols_keyboard())
+
+    async def list_symbols_callback(self, query, context):
+        """نمایش لیست کامل نمادها"""
+        symbols = self.stock_filter.get_symbols()
+
+        if not symbols:
+            text = "❌ هیچ نمادی تعریف نشده است"
+        else:
+            text = f"📋 لیست نمادها ({len(symbols)} نماد):\n\n"
+            for i, symbol in enumerate(symbols, 1):
+                ticker = symbol.get('ticker', 'N/A')
+                name = symbol.get('name', 'N/A')
+                text += f"{i}. {ticker} - {name}\n"
+
+        await query.edit_message_text(text, reply_markup=self.get_manage_symbols_keyboard())
+
+    async def handle_text_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """مدیریت پیام‌های متنی (برای اضافه کردن نماد)"""
+        if not self.is_authorized(update.effective_user.id):
+            return
+
+        # چک کردن آیا در حال انتظار برای ورودی هستیم
+        waiting_for = context.user_data.get('waiting_for')
+
+        if waiting_for == 'add_symbol':
+            text = update.message.text.strip()
+
+            # جدا کردن نام و ticker
+            if '|' not in text:
+                await update.message.reply_text(
+                    "❌ فرمت نادرست!\n\n"
+                    "لطفا به صورت زیر ارسال کنید:\n"
+                    "نام نماد | ticker\n\n"
+                    "مثال:\n"
+                    "گروه مالی نماد غدیر | نماد"
+                )
+                return
+
+            parts = text.split('|')
+            if len(parts) != 2:
+                await update.message.reply_text(
+                    "❌ فرمت نادرست!\n\n"
+                    "لطفا فقط یک | استفاده کنید"
+                )
+                return
+
+            name = parts[0].strip()
+            ticker = parts[1].strip()
+
+            if not name or not ticker:
+                await update.message.reply_text("❌ نام و ticker نمی‌توانند خالی باشند")
+                return
+
+            # اضافه کردن نماد
+            success = self.stock_filter.add_symbol(name, ticker)
+
+            if success:
+                symbols = self.stock_filter.get_symbols()
+                await update.message.reply_text(
+                    f"✅ نماد {ticker} با موفقیت اضافه شد\n\n"
+                    f"📊 تعداد کل نمادها: {len(symbols)}",
+                    reply_markup=self.get_main_keyboard()
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ خطا در اضافه کردن نماد {ticker}\n"
+                    f"(احتمالا این نماد قبلا وجود دارد)",
+                    reply_markup=self.get_main_keyboard()
+                )
+
+            # پاک کردن state
+            context.user_data.pop('waiting_for', None)
+
+    async def cancel_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """لغو عملیات جاری"""
+        context.user_data.pop('waiting_for', None)
+        await update.message.reply_text(
+            "✅ عملیات لغو شد",
+            reply_markup=self.get_main_keyboard()
+        )
+
     async def error_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """مدیریت خطاها"""
         print(f"Error: {context.error}")
@@ -1046,6 +1246,7 @@ class BourseBot:
             BotCommand("scanshamsi", "اسکن تاریخی با تاریخ شمسی (مثال: /scanshamsi 1403-09-29)"),
             BotCommand("stats", "نمایش آمار"),
             BotCommand("reset", "ریست داده‌ها"),
+            BotCommand("cancel", "لغو عملیات جاری"),
         ]
         await self.app.bot.set_my_commands(commands)
 
@@ -1066,6 +1267,10 @@ class BourseBot:
         self.app.add_handler(CommandHandler("scandate", self.scandate_command))
         self.app.add_handler(CommandHandler("scanshamsi", self.scanshamsi_command))
         self.app.add_handler(CommandHandler("stats", self.stats_command))
+        self.app.add_handler(CommandHandler("cancel", self.cancel_command))
+
+        # Handler برای پیام‌های متنی (برای اضافه کردن نماد)
+        self.app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, self.handle_text_message))
 
         # Error handler
         self.app.add_error_handler(self.error_handler)
