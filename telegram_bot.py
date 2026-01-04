@@ -1784,9 +1784,19 @@ class BourseBot:
         ]
         await self.app.bot.set_my_commands(commands)
 
+    async def post_init(self, application: Application) -> None:
+        """اجرا بعد از initialize شدن application"""
+        # ثبت کامندها در منوی تلگرام
+        await self.setup_bot_commands()
+        print("✅ کامندها در منوی تلگرام ثبت شدند")
+
+        # شروع خودکار اسکن اتوماتیک
+        self.start_auto_scan()
+        print("✅ اسکن اتوماتیک فعال شد (هر 5 دقیقه در ساعات بورس)")
+
     def run(self):
         """راه‌اندازی ربات"""
-        self.app = Application.builder().token(self.bot_token).build()
+        self.app = Application.builder().token(self.bot_token).post_init(self.post_init).build()
 
         # اضافه کردن handlers
         self.app.add_handler(CommandHandler("start", self.start))
@@ -1816,14 +1826,6 @@ class BourseBot:
             print(f"🔐 کاربران مجاز: {self.authorized_users}")
         else:
             print("⚠️  هشدار: همه کاربران مجاز هستند!")
-
-        # ثبت کامندها در منوی تلگرام
-        asyncio.get_event_loop().run_until_complete(self.setup_bot_commands())
-        print("✅ کامندها در منوی تلگرام ثبت شدند")
-
-        # شروع خودکار اسکن اتوماتیک
-        self.start_auto_scan()
-        print("✅ اسکن اتوماتیک فعال شد (هر 5 دقیقه در ساعات بورس)")
 
         # شروع polling
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
