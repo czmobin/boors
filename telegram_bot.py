@@ -244,8 +244,8 @@ class BourseBot:
             # تعیین اینکه آیا اولین اسکن روز است یا نه
             is_first_scan = not self.stock_filter.initial_data
 
-            # اجرای اسکن
-            data = self.stock_filter.fetch_and_calculate()
+            # اجرای اسکن با force refresh برای گرفتن داده جدید
+            data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if not data:
                 await msg.edit_text("❌ خطا در دریافت داده‌ها. لطفا دوباره تلاش کنید.")
@@ -299,8 +299,8 @@ class BourseBot:
         msg = await update.message.reply_text("🔍 در حال فیلتر کردن نمادها...")
 
         try:
-            # دریافت داده‌های فعلی
-            current_data = self.stock_filter.fetch_and_calculate()
+            # دریافت داده‌های فعلی با force refresh
+            current_data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if not current_data:
                 await msg.edit_text("❌ خطا در دریافت داده‌ها")
@@ -714,8 +714,8 @@ class BourseBot:
             current_time = datetime.now()
             print(f"🔄 اسکن اتوماتیک - {current_time.strftime('%H:%M:%S')}")
 
-            # اجرای اسکن
-            data = self.stock_filter.fetch_and_calculate()
+            # اجرای اسکن با force refresh برای گرفتن داده جدید
+            data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if data:
                 # اولین اسکن روز رو ذخیره کن (برای baseline)
@@ -924,8 +924,8 @@ class BourseBot:
             # تعیین اینکه آیا اولین اسکن روز است یا نه
             is_first_scan = not self.stock_filter.initial_data
 
-            # اجرای اسکن
-            data = self.stock_filter.fetch_and_calculate()
+            # اجرای اسکن با force refresh برای گرفتن داده جدید
+            data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if not data:
                 await query.edit_message_text(
@@ -1006,8 +1006,8 @@ class BourseBot:
         await query.edit_message_text("🔍 در حال فیلتر...")
 
         try:
-            # دریافت داده‌های فعلی
-            current_data = self.stock_filter.fetch_and_calculate()
+            # دریافت داده‌های فعلی با force refresh
+            current_data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if not current_data:
                 await query.edit_message_text(
@@ -1173,8 +1173,8 @@ class BourseBot:
         await update.message.reply_text("🔍 در حال فیلتر بر اساس تغییر قدرت پول...")
 
         try:
-            # دریافت داده‌های فعلی
-            current_data = self.stock_filter.fetch_and_calculate()
+            # دریافت داده‌های فعلی با force refresh
+            current_data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if not current_data:
                 await update.message.reply_text(
@@ -1257,8 +1257,8 @@ class BourseBot:
         await update.message.reply_text("🔍 در حال فیلتر بر اساس ورود پول...")
 
         try:
-            # دریافت داده‌های فعلی
-            current_data = self.stock_filter.fetch_and_calculate()
+            # دریافت داده‌های فعلی با force refresh
+            current_data = self.stock_filter.fetch_and_calculate(force_refresh=True)
 
             if not current_data:
                 await update.message.reply_text(
