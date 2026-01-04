@@ -4,8 +4,9 @@
 
 import pandas as pd
 import os
+import json
 from datetime import datetime
-from typing import List, Dict
+from typing import List, Dict, Set
 from openpyxl import load_workbook, Workbook
 from config import EXCEL_OUTPUT_DIR, EXCEL_FILENAME_TEMPLATE
 
@@ -13,7 +14,7 @@ from config import EXCEL_OUTPUT_DIR, EXCEL_FILENAME_TEMPLATE
 class ExcelManager:
     """کلاس برای مدیریت ذخیره و بارگذاری داده‌ها در Excel"""
 
-    def __init__(self):
+    def __init__(self, symbols_file: str = 'symbols.json'):
         # ایجاد پوشه خروجی در صورت عدم وجود
         if not os.path.exists(EXCEL_OUTPUT_DIR):
             os.makedirs(EXCEL_OUTPUT_DIR)
@@ -24,9 +25,37 @@ class ExcelManager:
             EXCEL_FILENAME_TEMPLATE.format(date=self.current_date)
         )
 
+        # بارگذاری لیست نمادهای مجاز از symbols.json
+        self.allowed_symbols = self._load_allowed_symbols(symbols_file)
+
+    def _load_allowed_symbols(self, symbols_file: str) -> Set[str]:
+        """
+        بارگذاری لیست نمادهای مجاز از فایل JSON
+        فقط برای این نمادها شیت ساخته می‌شود
+        """
+        try:
+            with open(symbols_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                symbols = data.get('symbols', [])
+
+                # استخراج ticker نمادها
+                allowed = set()
+                for symbol in symbols:
+                    ticker = symbol.get('ticker', '').strip()
+                    if ticker:
+                        allowed.add(ticker)
+
+                print(f"📋 نمادهای مجاز برای Excel: {allowed}")
+                return allowed
+
+        except Exception as e:
+            print(f"⚠️ خطا در بارگذاری symbols.json: {e}")
+            return set()
+
     def save_data(self, data_list: List[Dict]) -> None:
         """
         ذخیره داده‌ها در Excel
+        فقط برای نمادهای موجود در symbols.json شیت ساخته می‌شود
         هر نماد = یک شیت جداگانه
         هر اسکن = یک رکورد جدید در شیت مربوطه
 
@@ -35,6 +64,10 @@ class ExcelManager:
         """
         if not data_list:
             print("هیچ داده‌ای برای ذخیره وجود ندارد")
+            return
+
+        if not self.allowed_symbols:
+            print("⚠️ هیچ نمادی در symbols.json تعریف نشده - Excel ذخیره نمی‌شود")
             return
 
         try:
@@ -51,9 +84,15 @@ class ExcelManager:
                 if 'Sheet' in book.sheetnames:
                     del book['Sheet']
 
-            # برای هر نماد
+            saved_count = 0
+
+            # فقط برای نمادهای مجاز
             for item in data_list:
                 symbol_name = item.get('نماد', 'N/A')
+
+                # چک کن که این نماد در لیست مجازها هست
+                if symbol_name not in self.allowed_symbols:
+                    continue
 
                 # ساخت رکورد بدون نام نماد (چون اسم شیت خودش نام نماده)
                 record = self._prepare_record(item, current_time)
@@ -66,9 +105,11 @@ class ExcelManager:
                     # ساخت شیت جدید
                     self._create_new_sheet(book, symbol_name, record)
 
+                saved_count += 1
+
             # ذخیره فایل
             book.save(self.filename)
-            print(f"✅ {len(data_list)} نماد در Excel ذخیره شد - زمان: {current_time}")
+            print(f"✅ {saved_count} نماد در Excel ذخیره شد - زمان: {current_time}")
 
         except Exception as e:
             print(f"خطا در ذخیره داده‌ها: {e}")
