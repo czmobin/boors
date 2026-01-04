@@ -711,16 +711,25 @@ class BourseBot:
     async def auto_scan_job(self):
         """اسکن اتوماتیک (هر 5 دقیقه)"""
         try:
-            print(f"🔄 اسکن اتوماتیک - {datetime.now().strftime('%H:%M:%S')}")
+            current_time = datetime.now()
+            print(f"🔄 اسکن اتوماتیک - {current_time.strftime('%H:%M:%S')}")
 
             # اجرای اسکن
             data = self.stock_filter.fetch_and_calculate()
 
             if data:
-                # اولین اسکن روز رو ذخیره کن
+                # اولین اسکن روز رو ذخیره کن (برای baseline)
                 if not self.stock_filter.initial_data:
-                    self.stock_filter.initial_data = {item['کد']: item for item in data}
-                    print(f"✅ داده پایه ذخیره شد - {len(data)} نماد")
+                    time_key = current_time.strftime('%H:%M')
+                    data_dict = {item['کد']: item for item in data}
+
+                    # ذخیره در historical_records
+                    self.stock_filter.historical_records[time_key] = data_dict
+
+                    # ذخیره برای backward compatibility
+                    self.stock_filter.initial_data = data_dict
+
+                    print(f"✅ داده پایه ذخیره شد - {len(data)} نماد (زمان: {time_key})")
 
                 # ذخیره در Excel (فایل قبلی پاک میشه)
                 self.stock_filter.excel_manager.save_data(data)
@@ -757,7 +766,36 @@ class BourseBot:
             self.scheduler.start()
 
         self.auto_scan_enabled = True
-        return "✅ اسکن اتوماتیک فعال شد\n\n⏰ هر 5 دقیقه (ساعات بورس: 9:00-12:30)"
+
+        # محاسبه زمان بعدی اسکن
+        now = datetime.now(pytz.timezone('Asia/Tehran'))
+        next_run = None
+
+        # پیدا کردن بعدی زمان 5 دقیقه‌ای در بازه 9-12
+        current_minute = now.minute
+        next_minute = ((current_minute // 5) + 1) * 5
+
+        if 9 <= now.hour < 12 or (now.hour == 12 and now.minute < 30):
+            # اگر الان توی ساعات کاری هستیم
+            if next_minute >= 60:
+                next_run_time = now.replace(hour=now.hour + 1, minute=next_minute - 60, second=0)
+            else:
+                next_run_time = now.replace(minute=next_minute, second=0)
+
+            if next_run_time.hour <= 12 and not (next_run_time.hour == 12 and next_run_time.minute > 30):
+                next_run = next_run_time.strftime('%H:%M')
+
+        msg = "✅ اسکن اتوماتیک فعال شد\n\n"
+        msg += "⏰ برنامه: هر 5 دقیقه\n"
+        msg += "📅 روزها: شنبه تا چهارشنبه\n"
+        msg += "🕐 ساعات: 9:00 - 12:30\n"
+
+        if next_run:
+            msg += f"\n⏭ اسکن بعدی: {next_run}"
+        else:
+            msg += "\n💡 اسکن بعدی در ساعات کاری بورس انجام می‌شود"
+
+        return msg
 
     def stop_auto_scan(self):
         """توقف اسکن اتوماتیک"""
@@ -898,8 +936,16 @@ class BourseBot:
 
             # ذخیره داده‌های اولیه در صورت نیاز
             if is_first_scan:
-                self.stock_filter.initial_data = {item['کد']: item for item in data}
-                status = "✅ اسکن اول روز انجام شد"
+                current_time = datetime.now().strftime('%H:%M')
+                data_dict = {item['کد']: item for item in data}
+
+                # ذخیره در historical_records
+                self.stock_filter.historical_records[current_time] = data_dict
+
+                # ذخیره برای backward compatibility
+                self.stock_filter.initial_data = data_dict
+
+                status = f"✅ اسکن اول روز انجام شد (زمان: {current_time})"
             else:
                 status = "✅ اسکن انجام شد"
 
