@@ -131,7 +131,7 @@ class BourseCalculator:
             'buyer_power_ratio': round(buyer_power_ratio, 2),
             'avg_buy_legal': round(avg_buy_legal, 2),
             'avg_sell_legal': round(avg_sell_legal, 2),
-            'net_money_flow': round(legal_money_flow, 2),  # ورود پول خالص (حقوقی)
+            'net_money_flow': round(real_money_flow, 2),  # ورود پول خالص (حقیقی)
             # داده‌های خام برای دیباگ
             'pc': pc,
             'x_avg_buy_real_toman': round(x, 2),

@@ -1821,6 +1821,10 @@ class BourseBot:
         asyncio.get_event_loop().run_until_complete(self.setup_bot_commands())
         print("✅ کامندها در منوی تلگرام ثبت شدند")
 
+        # شروع خودکار اسکن اتوماتیک
+        self.start_auto_scan()
+        print("✅ اسکن اتوماتیک فعال شد (هر 5 دقیقه در ساعات بورس)")
+
         # شروع polling
         self.app.run_polling(allowed_updates=Update.ALL_TYPES)
 
