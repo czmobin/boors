@@ -709,7 +709,7 @@ class BourseBot:
         await update.message.reply_text(stats)
 
     async def auto_scan_job(self):
-        """اسکن اتوماتیک (هر 5 دقیقه)"""
+        """اسکن اتوماتیک (هر 1 دقیقه)"""
         try:
             current_time = datetime.now()
             print(f"🔄 اسکن اتوماتیک - {current_time.strftime('%H:%M:%S')}")
@@ -746,12 +746,12 @@ class BourseBot:
             return "⚠️ اسکن اتوماتیک قبلاً فعال شده"
 
         # ساعات کاری بورس: شنبه تا چهارشنبه 9:00-12:30
-        # هر 5 دقیقه
+        # هر 1 دقیقه
         # روزها: sat=5, sun=6, mon=0, tue=1, wed=2
         trigger = CronTrigger(
             day_of_week='sat,sun,mon,tue,wed',  # شنبه تا چهارشنبه
             hour='9-12',
-            minute='*/5',
+            minute='*/1',
             timezone=pytz.timezone('Asia/Tehran')
         )
 
@@ -771,14 +771,14 @@ class BourseBot:
         now = datetime.now(pytz.timezone('Asia/Tehran'))
         next_run = None
 
-        # پیدا کردن بعدی زمان 5 دقیقه‌ای در بازه 9-12
+        # پیدا کردن بعدی زمان 1 دقیقه‌ای در بازه 9-12
         current_minute = now.minute
-        next_minute = ((current_minute // 5) + 1) * 5
+        next_minute = current_minute + 1
 
         if 9 <= now.hour < 12 or (now.hour == 12 and now.minute < 30):
             # اگر الان توی ساعات کاری هستیم
             if next_minute >= 60:
-                next_run_time = now.replace(hour=now.hour + 1, minute=next_minute - 60, second=0)
+                next_run_time = now.replace(hour=now.hour + 1, minute=0, second=0)
             else:
                 next_run_time = now.replace(minute=next_minute, second=0)
 
@@ -786,7 +786,7 @@ class BourseBot:
                 next_run = next_run_time.strftime('%H:%M')
 
         msg = "✅ اسکن اتوماتیک فعال شد\n\n"
-        msg += "⏰ برنامه: هر 5 دقیقه\n"
+        msg += "⏰ برنامه: هر 1 دقیقه\n"
         msg += "📅 روزها: شنبه تا چهارشنبه\n"
         msg += "🕐 ساعات: 9:00 - 12:30\n"
 
@@ -1792,7 +1792,7 @@ class BourseBot:
 
         # شروع خودکار اسکن اتوماتیک
         self.start_auto_scan()
-        print("✅ اسکن اتوماتیک فعال شد (هر 5 دقیقه در ساعات بورس)")
+        print("✅ اسکن اتوماتیک فعال شد (هر 1 دقیقه در ساعات بورس)")
 
     def run(self):
         """راه‌اندازی ربات"""

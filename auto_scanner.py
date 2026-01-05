@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 اسکنر خودکار بورس - بدون تلگرام
-هر 5 دقیقه در ساعات بورس اسکن می‌کند و در Excel ذخیره می‌کند
+هر 1 دقیقه در ساعات بورس اسکن می‌کند و در Excel ذخیره می‌کند
 """
 
 import time
@@ -22,7 +22,7 @@ class AutoScanner:
         print(f"📊 تعداد نمادها برای اسکن: {'همه (1369)' if not self.stock_filter.symbols else len(self.stock_filter.symbols)}")
         print(f"📋 نمادها برای Excel: {self.stock_filter.excel_manager.allowed_symbols}")
         print(f"📁 مسیر فایل Excel: {self.stock_filter.excel_manager.filename}")
-        print("⏰ برنامه: هر 5 دقیقه در ساعات بورس")
+        print("⏰ برنامه: هر 1 دقیقه در ساعات بورس")
         print("🕐 ساعات کاری: 9:00 - 12:30 (شنبه تا چهارشنبه)")
         print("=" * 60)
 
@@ -115,10 +115,10 @@ class AutoScanner:
         self.run_if_market_open()
 
         # برنامه‌ریزی اسکن‌های بعدی
-        schedule.every(5).minutes.do(self.run_if_market_open)
+        schedule.every(1).minutes.do(self.run_if_market_open)
 
         print("\n✅ اسکنر خودکار فعال شد")
-        print("⏰ اسکن بعدی: 5 دقیقه دیگر")
+        print("⏰ اسکن بعدی: 1 دقیقه دیگر")
         print("\n💡 برای توقف: Ctrl+C")
         print(f"{'=' * 60}\n")
 
